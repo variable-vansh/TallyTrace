@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pipeline.config import REPO_ROOT
 
-SOURCE_DIRS = ["pipeline", "generator", "harness", "tests"]
+SOURCE_DIRS = ["pipeline", "generator", "harness", "tools", "tests"]
 TRUTH_REFERENCE = re.compile(r"""data[/\\]truth|["']truth["']|DEFAULT_TRUTH""")
 LLM_IMPORT = re.compile(r"^\s*(?:from|import)\s+anthropic\b", re.MULTILINE)
 FUZZY_IMPORT = re.compile(
@@ -42,13 +42,33 @@ def test_pipeline_never_references_the_ground_truth_path() -> None:
     assert offenders == [], f"pipeline reads the answer key at: {offenders}"
 
 
+def test_only_the_generators_entry_point_names_the_truth_path() -> None:
+    """The generator writes the answer key, so exactly one module there may name it.
+
+    ``generator/main.py`` takes the directory as a CLI argument and hands it to the
+    writer; nothing deeper down constructs a truth path of its own. One writer and one
+    reader means "who could have touched the answers?" has a two-line answer.
+    """
+    writers = sorted(
+        path.name
+        for path in python_files("generator")
+        if TRUTH_REFERENCE.search(path.read_text(encoding="utf-8"))
+    )
+    assert writers == ["main.py"], f"the answer key path is named in: {writers}"
+
+
 def test_the_truth_directory_is_not_importable_from_the_pipeline_package() -> None:
     assert (REPO_ROOT / "data" / "truth").is_dir()
     assert not (REPO_ROOT / "pipeline" / "truth").exists()
 
 
 def test_llm_client_is_imported_only_under_pipeline_llm() -> None:
-    """LLM calls may only appear in pipeline/llm/. Enforced now, before any exist."""
+    """LLM calls may only appear in pipeline/llm/.
+
+    ``tools/`` is in scope as well as the packages: the fixture writer builds the same
+    prompts the client sends, and it would be the obvious place for a shortcut that
+    calls a model directly and never goes through the cache.
+    """
     offenders = [
         str(path.relative_to(REPO_ROOT))
         for path in python_files(*SOURCE_DIRS)

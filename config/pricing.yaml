@@ -16,3 +16,9 @@ usd_per_mtok:
 # it is here so the number in the report is stated in one currency rather than
 # silently mixing two.
 usd_to_inr: 88.00
+
+# Token estimate for cache entries whose usage was not metered by the HTTP API.
+# Approximate, and labelled as approximate everywhere the number surfaces. The
+# alternative -- recording zero -- would report a model-backed pipeline as free,
+# which is a more misleading number than an approximate one.
+estimated_chars_per_token: 3.6

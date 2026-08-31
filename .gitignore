@@ -16,7 +16,13 @@ ui/dist/
 # Local env
 .env
 
-# Derived reconciliation output; regenerate with `make reconcile` / `make score`.
+# Derived output; regenerate with `make demo`.
 # EXCEPTIONS.md is committed on purpose: it is the honest half of the result.
+# data/llm_cache/ and data/resolutions.json ARE committed: the cache is what makes a
+# rerun deterministic and free, and the resolution log is the root of every provenance
+# chain in the system.
 data/reconciliation.json
 data/score.json
+data/learning.json
+data/rules.json
+ui/public/tallytrace.json

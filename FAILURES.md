@@ -389,3 +389,323 @@ exactly 8.80% on Myntra: inside the band, on the same channel, indistinguishable
 tests in `tests/test_learning_features.py` now hold all three of those properties in
 place, because each is a dataset property that checkpoint 3 silently depends on and that
 nothing else would notice breaking.
+
+---
+
+## Checkpoint 3 — The Learning Loop
+
+### 18. Hypothesis generation was designed per row, which would have made the cost report a lie
+
+**What happened.** The first design asked the model about every queued case, as the
+checkpoint describes: "for every `variance` and `unmatched` row, send the LLM the row".
+Four hundred cases, four hundred calls. Then I looked at what the calls actually
+*contained*: eighty-nine of them were "Myntra, fee variance outside tolerance, short,
+8.8% over expectation" with nothing distinguishing them but the paise.
+
+**Why it mattered.** Two ways, and the second is worse. The obvious one is cost: the
+harness reports rupees per reconciled transaction, and asking the same question
+eighty-nine times would have inflated that number by roughly an order of magnitude
+while adding nothing. The subtle one is determinism. If two numerically identical rows
+can get different hypotheses, the difference is noise, and it is noise that a
+bookkeeper would read as a distinction.
+
+**Fix.** The prompt is built from a normalised *question* — channel, reason code,
+direction, variance percentages to one decimal, day counts as bands, row type — rather
+than from the case. Identical questions collapse to one cached answer by construction,
+because the cache key is a hash of the prompt. The corpus's 395 non-quarantined cases
+ask **45 distinct questions**. The case's own exact rupee figures are shown beside the
+hypothesis in the UI, straight from the matcher's verdict detail, where they are exact
+rather than paraphrased.
+
+### 19. The rupee guardrail was measuring the size of the sale, not the size of the error
+
+**What happened.** `CaseFeatures.variance_inr` is the number `max_variance_inr` is
+applied to. The first version took the largest money figure in the verdict detail,
+which included `expected_net`. A ₹32.73 commission variance on a ₹3,917 order reported
+a variance of ₹3,917.
+
+**Why it mattered.** Every stale-rate exception in the corpus is a two-figure error on
+a four-figure order. Under the ₹500 ceiling, the guardrail would have refused to
+auto-resolve **every single one** — and it would have looked like conservatism working
+rather than like a bug. The auto-resolution rate would have been near zero and the
+explanation would have been "the guardrails are strict", which is exactly the kind of
+wrong answer that sounds like a good one.
+
+**Fix.** `DELTA_KEYS` names the four fields that measure a *deviation*;
+`expected_net` is the fallback and only the fallback, for an order that never settled
+and therefore has no delta. `test_the_guardrail_number_measures_the_error_not_the_order`
+holds it.
+
+### 20. Two rules were permanently in conflict because rules could not see a row type
+
+**What happened.** `late_row_for_already_settled_order` covers two different
+phenomena that arrive days apart and both take money back: a refund deduction landing
+a cycle late, and a TCS recovery landing a cycle late. The rules induced for them were
+`(amazon, late row, short, 1–14 days)` and `(amazon, late row, short, 1–7 days)` —
+equally specific, different causes. `select` correctly refused to choose and sent
+every Amazon late row to a human.
+
+**Why it mattered.** The refusal was *right* — equally specific rules that disagree
+should go to a person — but the underlying problem was that the rule schema could not
+express a distinction the operator's own note made explicitly ("this is the TCS they
+didn't collect at the time of the sale", versus "we issued this refund ourselves").
+The system was less expressive than the sentence it was learning from.
+
+**Fix.** `transaction_type` added to the induced-rule schema, the stored rule, the
+predicate and the specificity count. It is a property of the phenomenon and not an
+identifier, so it does not weaken the no-memorisation constraint. The two rules now
+have disjoint conditions rather than a permanent tie.
+
+### 21. The review rate does not decline to batch 10, and I did not fix the data
+
+**This is the one done condition this checkpoint does not meet, and the interesting
+part is what fixing it would have required.**
+
+The net review rate runs `18.64 → 22.67 → 18.39 → 25.49 → 21.93 → 12.50 → 14.89 →
+15.48 → 17.86 → **22.65**`. It falls hard through the middle of the corpus and ends
+four points above where it started.
+
+**Why.** Batch 10's queue is 76 flagged settlement rows, of which 33 are late
+deductions — RTO reversals and lagged refunds — every one of them a four-figure
+clawback. The `max_variance_inr: 500.00` guardrail refuses to auto-resolve any of
+them. Rules R-11 and R-17 match all 33 and explain all 33 correctly; the ceiling holds
+every one for a human anyway.
+
+Batch 10 has three cohorts of them because the injection plan compresses the
+cross-batch offsets near the end of the corpus so the rows still land inside it —
+batch 8's, batch 9's and batch 7's reversals all arrive in batch 10. That is stated in
+`config/generation.yaml` and was already flagged in failure #6 as the first thing to
+check if batch 10 looks unlike the rest.
+
+**Three ways to make the number decline, and why I took none of them.**
+
+1. *Raise `max_variance_inr`.* This is the one that works instantly and it is
+   explicitly what the checkpoint says not to do. A ₹2,400 clawback against an order
+   the books had closed is money at risk, and a rule being confident about it does not
+   make it less so.
+2. *Exclude late deductions from the variance measure*, on the argument that the money
+   is correct and only the cycle is wrong. That argument is genuinely available — it
+   is the argument failure #7 accepted for `settlement_outside_date_window`, which
+   carries an impact of ₹0.00. It does not hold here: a late *payout* matched the
+   books, whereas a late *deduction* has no counterpart in the books at all. Until
+   someone confirms the return happened, the whole amount is unexplained.
+3. *Thin out batch 10 in the generator.* Making the last batch cleaner to flatter the
+   curve is the same failure as making batch 1 cleaner, which checkpoint 1 forbids by
+   name. It would also have been the most invisible of the three.
+
+**What I did instead.** Reported two series and printed both, with the arithmetic for
+each. `net_review_rate` is rows a human still owns; it is the strict reading and it
+does not decline. `human_touchpoints` is *distinct decisions a human has to make* —
+a case no rule matched counts once, and a batch proposal card counts once no matter how
+many rows it collapses. That series runs `22.03 → 22.67 → 16.09 → 25.49 → 25.44 →
+14.06 → 10.64 → 9.68 → 9.52 → **6.08**`, a 3.6× decline that plateaus above zero.
+
+Both numbers are true and they measure different things. Batch 10 leaves 41 rows with
+a human and asks them 11 questions. Reporting only the second would be the failure this
+harness exists to catch; reporting only the first would hide the entire point of the
+batch-proposal design. So the report prints them side by side and says which is which.
+
+### 22. The near-miss fooled the operator too, so one precision number was not enough
+
+**What happened.** The near-miss rows are Myntra orders repriced to exactly the
+stale-rate signature — same channel, same 8.80% band — with a different true cause in
+the answer key. Rule R-05 fires on them and is wrong, which is what they are for.
+Then the *operator* looked at one, saw a Myntra order 8.8% over the master rate, and
+wrote the stale-rate note. So the rule's live precision, computed from what the human
+said, stayed at 100.00%.
+
+**Why it mattered.** Live precision is the product's signal: it is how the system finds
+out it was wrong without an oracle. But an operator and a rule can be wrong in the same
+direction, and if the only number on the rules page is the one they agree on, the
+system reports perfect confidence about a row it got wrong.
+
+**Fix.** Two precision numbers, printed adjacent. **Live precision** (100.00% for R-05)
+is what the operator's resolutions said. **True precision** (97.44% over 78) is what
+the answer key says about the rows the rule closed unattended. The rules page shows the
+gap and says in words what it means. Overall auto-resolution precision is **98.63% over
+146 scored resolutions**, and the two rows separating it from 100% are exactly the two
+`near_miss_fee_variance` injections, in batches 5 and 8.
+
+The done condition asks that the near-miss "either got caught by a guardrail or shows
+up in the precision number as a real miss". It shows up, twice, and
+`test_the_near_miss_shows_up_as_a_real_miss_rather_than_passing_silently` fails if it
+ever stops.
+
+### 23. The token counts are estimated, and every number built on them says so
+
+**Not a bug — a provenance statement.** There is no `ANTHROPIC_API_KEY` in the
+environment this was built in, so the cached answers in `data/llm_cache/` were produced
+by Claude Opus reading each rendered prompt through a coding session rather than
+through the HTTP Messages API. The request text and the output schema are byte-identical
+to what `pipeline/llm/client.py` sends; only the transport differs.
+
+The consequence is token counts. The API meters them and a transcript does not, so
+those entries carry `source: "transcript"` and their usage is derived from character
+length via `estimated_chars_per_token` in `config/pricing.yaml`. The alternative —
+recording zero — would report a model-backed pipeline as free, which is a more
+misleading number than an approximate one.
+
+`LlmClient` tracks whether any answer it billed was estimated, and the throughput
+section of `make score` prints **TOKEN COUNTS ARE ESTIMATED** in full whenever it was.
+Set a key, delete `data/llm_cache/`, run `make llm-fixtures`, and the same prompts go
+over the wire; the cache repopulates with `source: "api"` and metered usage, and no
+other code changes.
+
+One related decision: a cache hit is billed at the **cache-read** rate rather than as
+free. The first run paid for the answer, and a per-transaction cost that only counts
+the runs where the disk happened to be empty is not a cost. Current figure: 337,024
+tokens, ₹141.51, **₹0.117 per settlement row**.
+
+### 24. The rule that retired itself was left in, and the note that caused it was not rewritten
+
+**Deliberate, and it is the single best piece of evidence in the build.**
+
+In batch 2 the operator wrote, about a Flipkart clawback: *"A deduction landing a week
+after we'd already been paid and closed the order. That's a return coming back through
+— happens on all the marketplaces, the goods take time to get to the warehouse."*
+
+That sentence generalises across every channel, and induction faithfully produced R-07:
+no channel, late-row reason, refund type, 1–21 day lag, cause
+`rto_reversal_later_cycle`. In batch 3 it predicted on six late rows: three Flipkart
+(right) and three Amazon (wrong — those are refunds the seller had already booked, as
+the operator's own Amazon note says). Five judged observations at 40.00% precision,
+below the 75.00% floor, and `advance` retired it at the end of batch 3 with the reason
+recorded on the transition.
+
+It would have been trivial to write a tighter batch-2 note. That is precisely the thing
+the checkpoint warns against — "if you write resolution text engineered to induce
+cleanly, you have tested nothing" — and it would have removed the only demonstration
+that retirement happens. The rules page shows R-07 in red at the top with an
+explanation rather than filtering it out.
+
+### 25. The ledger rate correction is proposed, not applied to the corpus
+
+**A decision, recorded because it is a real limitation.**
+
+R-05's action is `update_ledger_rate → expected_commission_rate = 0.242`. Applying it
+would be the honest production behaviour: correct the master rate and the exception
+stops being generated at all.
+
+It is not applied to the ten batches, and the reason is measurement. The corpus is a
+fixed historical extract that the harness scores against a fixed answer key. If
+accepting the rule in batch 3 rewrote the ledger for batches 4 to 10, those Myntra
+orders would reconcile clean — and the harness, which knows from `data/truth` that
+those rows carry an injected `commission_rate_stale`, would score all 127 of them as
+**silent clears**. The single most important honesty metric in the build would report a
+catastrophe caused by the system working correctly.
+
+So the action is recorded on the rule, shown on the proposal card and on the rules page,
+and left unapplied against the measured corpus. A production deployment writes it back;
+a benchmark cannot mutate its own input and still be a benchmark. Stated here rather
+than buried, because "the rate fix doesn't actually fix anything yet" is a fair question
+to ask of this build and it deserves a real answer.
+
+### 26. Three checkpoint-2 tests were describing seams that no longer exist
+
+`test_precision_over_no_attempts_is_undefined_not_perfect` asserted
+`score.proposals == []`. `test_the_net_review_rate_falls_when_a_rule_resolves_rows`
+passed `proposals=` into `harness.score.run`, which now derives them. Both were correct
+about checkpoint 2 and wrong about the repo.
+
+Neither was deleted. The first was rewritten to assert the property on
+`auto_resolution_precision([])` directly, where it still holds and always will, plus a
+new test that the seam is now *filled* — because an empty proposal list would make every
+precision number in the report read "undefined" rather than "wrong", which is the quiet
+regression the harness is for. The second was rewritten to drive `batch_metrics` with a
+hand-built resolved set, so it keeps testing the arithmetic as the loop that feeds it
+changes.
+
+`test_the_answer_key_is_read_in_exactly_one_module` also failed, because
+`harness/learning.py` mentioned `data/truth` in its docstring. The assertion is worth
+more than the sentence, so the docstring changed and the test stayed strict.
+
+### 27. The card-decision path is real code the shipped run never exercises
+
+The checkpoint asks that "Not this time" record a negative observation against a rule,
+affecting its precision and possibly retiring it. `_apply_card_decisions` does exactly
+that, and in the shipped run it does nothing at all, because the operator declined no
+cards: the one retirement came from their own later resolutions contradicting an
+over-general note.
+
+I could have planted a decline to make the path light up. It would have meant inventing
+an operator who rejects a card whose cause is correct, which is a worse thing to put in
+the data than an unexercised branch is to put in the code.
+
+Instead the path is driven directly by four tests — accept confirms every prediction
+behind the card, decline refutes them and the record then clears the retirement floor,
+"review individually" judges nothing either way, and a decision only touches the batch it
+was made in. Recorded here because "why does this branch have no coverage from the run?"
+is a fair question and the answer is a choice rather than an oversight.
+
+### 28. The UI implies a write-back it does not have
+
+The proposal cards carry "Accept all", "Review individually" and "Not this time"; the
+rules page carries "Narrow the band" and "Disable". There is no server behind the UI —
+it renders one scored run from a JSON file — so none of them writes anything.
+
+Left in rather than removed, because they are the interaction the checkpoint is about
+and a rules page with no controls would misrepresent the design in the other direction.
+Made honest instead: the queue carries a sentence at the top saying this is a recorded
+run, and each control, once clicked, states exactly what it *would* record — "would
+record 3 negative observation(s) against R-27, lowering its live precision and possibly
+retiring it". The logic behind each is real and tested; only the persistence is missing.
+
+### 29. Three things the wrap-up audit found that the tests were happy with
+
+Read the whole tree back against the brief's quality bar before committing. Three real
+defects, none of which any test noticed.
+
+**A dead branch in the precision scorer.** `true_cause_of` read:
+
+```python
+return sorted(found)[0] if len(found) == 1 else (sorted(found)[0] if found else None)
+```
+
+Both branches are identical. It looks like it handles the ambiguous case — a case whose
+rows map to two different injected causes — and it does not; it takes the
+alphabetically first cause either way. There are 0 such cases in 390 attributable ones,
+because no injector stacks two troubles on one order, so the branch never ran and
+nothing failed. But an arbitrary pick would have flattered or penalised the run
+depending on nothing, and the *shape* of the code claimed a care it did not take.
+
+Now returns `None` on ambiguity — refusing to score is the honest answer, and the count
+already surfaces as `unscored_auto_resolutions`. The docstring states the measured
+figure so the next reader knows the branch is dead by construction rather than by luck.
+
+**The boundary greps did not cover `tools/`.** `SOURCE_DIRS` was written in checkpoint 2,
+when `tools/` did not exist. It now holds the fixture writer, which builds the same
+prompts the client sends and is the single most obvious place to put a shortcut that
+calls a model directly and skips the cache. The `anthropic` and fuzzy-matching greps
+now include it.
+
+The same read produced a *tighter* test rather than a looser one. There was an assertion
+that `harness/truth.py` is the only module reading the answer key, and no equivalent on
+the writing side. `test_only_the_generators_entry_point_names_the_truth_path` now asserts
+`generator/main.py` is the only module that names it going in — so "who could have
+touched the answers?" has a two-line answer instead of a one-line one.
+
+**A module with no tests.** `pipeline/rules/proposals.py` — the batch proposal cards,
+which are the entire reason the two review series in the report diverge — had only
+end-to-end coverage. The brief's bar is "every module gets tests before the next
+checkpoint starts", and a card that could claim rows its rule did not match, or merge an
+auto-resolution with a guardrail hold, would turn the touchpoint number from a
+measurement into a story. Nine tests now, including the one that matters most: resolved
+and held rows from the same rule get separate cards.
+
+Also added `tests/test_ui_data.py`, which asserts the browser and the terminal are
+quoting the same run, and that `data/score.json` contains no float outside the labelled
+`timings` block.
+
+### Checkpoint gate — done conditions, answered
+
+| condition | result |
+|---|---|
+| Review rate declines **and** precision holds | **Partial.** Precision holds at 98.63%. The strict row-level rate ends 4 points above batch 1; the decision-level rate falls 22.03% → 6.08%. Failure #21 has the full argument and the three fixes I refused. |
+| The curve plateaus above zero | **Yes.** No batch reaches zero on either series; batch 10 still asks 11 questions. |
+| Held-out categories in batches 7 and 9 correctly not auto-resolved | **Yes.** 100% abstention on both, on first sight and across the whole corpus. Neither is a special case in the code — it falls out of the lifecycle and the guardrails. |
+| At least one rule retired itself, and you can point to why | **Yes.** R-07, batch 3, 40.00% over 5 judged observations. Failure #24. |
+| The near-miss caught by a guardrail or visible as a real miss | **Visible as a real miss**, both of them, and they are the entire gap between 98.63% and 100%. Failure #22. |
+| No rule in the store contains a transaction id | **Yes**, enforced twice — the schema has no field for one, and `assert_generalisable` checks the free-text values. Four tests, including one over the shipped `data/rules.json`. |
+| Provenance chain complete for every auto-resolution | **Yes.** Rule, state at fire, source resolution, operator, proposed cause, and all three guardrail evaluations on all 146. The decision-path view renders the record verbatim. |
+| LLM calls confined to `pipeline/llm/`, cached, deterministic on rerun | **Yes.** `anthropic` is imported in exactly one file; `pipeline/rules/` cannot reach a client at all; `score.json` is byte-identical across runs apart from the labelled `timings` block. |
+| Batch proposal cards and rules page plugged into the existing UI | **Yes.** Both in the existing shell, plus the decision path on every exception and every flagged transaction row. |

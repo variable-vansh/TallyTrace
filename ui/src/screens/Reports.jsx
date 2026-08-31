@@ -1,267 +1,249 @@
-import React, { useState, useMemo } from 'react'
-import { BarChart, Bar, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts'
-import { Send, BarChart2 } from 'lucide-react'
-
-const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
-}
+import { useMemo, useState } from 'react'
+import {
+  Bar, BarChart, Cell, CartesianGrid, Legend, Pie, PieChart, ResponsiveContainer,
+  Tooltip, XAxis, YAxis,
+} from 'recharts'
+import { AlertOctagon, FileWarning, ShieldOff } from 'lucide-react'
+import StatusBadge from '../components/StatusBadge'
+import { inr, pct, humanise } from '../lib/format'
 
 const CHANNEL_COLORS = {
-  amazon: '#3D4FE0',
-  flipkart: '#1FAA59',
-  myntra: '#F59E0B',
-  offline: '#EF4444',
-  website: '#8B5CF6',
+  amazon: '#3D4FE0', flipkart: '#1FAA59', myntra: '#F59E0B',
+  offline: '#EF4444', website: '#8B5CF6',
 }
-
-const SCENARIO_LABELS = {
-  stale_commission_rate_drift: 'Stale Commission',
-  known_fee_formula_mismatch: 'Fee Mismatch',
-  refund_timing_lag: 'Refund Lag',
-  settlement_on_hold: 'On Hold',
-  tax_timing_mismatch: 'Tax Timing',
-  dispute_chargeback_pending: 'Chargeback',
-  duplicate_order_row: 'Duplicate Row',
-  exact_amount_rounding: 'Rounding',
-  partial_refund_ambiguous: 'Partial Refund',
-  genuine_novel_anomaly_mystery_credit: 'Novel: Mystery Credit',
-  genuine_novel_anomaly_negative_fee: 'Novel: Negative Fee',
-  genuine_novel_anomaly_wrong_settlement_batch: 'Novel: Wrong Batch',
-  genuine_novel_anomaly_amount_doubling: 'Novel: Amount Doubling',
-  genuine_novel_anomaly_phantom_order: 'Novel: Phantom Order',
-  genuine_novel_anomaly_zero_amount: 'Novel: Zero Amount',
-  genuine_novel_anomaly_future_dated_settlement: 'Novel: Future Dated',
-  genuine_novel_anomaly_fee_exceeds_amount: 'Novel: Fee > Amount',
-  genuine_novel_anomaly_duplicate_entity_id: 'Novel: Duplicate Entity',
-  genuine_novel_anomaly_negative_amount: 'Novel: Negative Amount',
-}
-
 const PIE_COLORS = ['#3D4FE0', '#1FAA59', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16']
+const AXIS = { fill: '#6B7280', fontSize: 12 }
+const TOOLTIP = { contentStyle: { borderRadius: '8px', border: '1px solid #E7E7EA', fontSize: 12 } }
 
-export default function Reports({ weekData, allWeeks }) {
-  const [tab, setTab] = useState('history')
-  const [chatInput, setChatInput] = useState('')
-  const [chatMessages, setChatMessages] = useState([])
+const TABS = [
+  { id: 'money', label: 'Money' },
+  { id: 'causes', label: 'Causes' },
+  { id: 'abstention', label: 'Abstention' },
+  { id: 'quarantine', label: 'Quarantine' },
+]
 
-  // Revenue by channel — real computed data
-  const revenueByChannel = useMemo(() => {
-    if (!weekData?.transactions) return []
+function Card({ title, subtitle, children, className = '' }) {
+  return (
+    <div className={`bg-white rounded-2xl border border-divider p-6 ${className}`}>
+      <h2 className="text-sm font-medium text-muted uppercase tracking-wide">{title}</h2>
+      {subtitle && <p className="text-xs text-muted mt-0.5 mb-3">{subtitle}</p>}
+      {children}
+    </div>
+  )
+}
+
+export default function Reports({ weekData, allWeeks, data }) {
+  const [tab, setTab] = useState('money')
+
+  const moneyByWeek = useMemo(
+    () => allWeeks.map((w) => ({
+      name: `W${w.week}`,
+      auto: w.stats.rupeesAutoResolved,
+      escalated: w.stats.rupeesEscalated,
+    })),
+    [allWeeks]
+  )
+
+  const impactByChannel = useMemo(() => {
     const agg = {}
-    weekData.transactions.forEach(t => {
-      agg[t.channel] = (agg[t.channel] || 0) + t.credit
-    })
-    return Object.keys(agg)
-      .map(k => ({ channel: k.charAt(0).toUpperCase() + k.slice(1), revenue: Math.round(agg[k]), raw: k }))
-      .sort((a, b) => b.revenue - a.revenue)
-  }, [weekData])
-
-  // Exception causes — real computed data
-  const exceptionByCause = useMemo(() => {
-    if (!weekData?.exceptions) return []
-    const agg = {}
-    weekData.exceptions.forEach(e => {
-      const label = SCENARIO_LABELS[e.scenarioType] || e.scenarioType
-      agg[label] = (agg[label] || 0) + 1
-    })
-    return Object.keys(agg)
-      .map(k => ({ name: k, value: agg[k] }))
+    for (const exc of weekData.exceptions || []) {
+      if (!exc.channel) continue
+      agg[exc.channel] = (agg[exc.channel] || 0) + exc.impact
+    }
+    return Object.entries(agg)
+      .map(([channel, value]) => ({ channel, value: Math.round(value) }))
       .sort((a, b) => b.value - a.value)
   }, [weekData])
 
-  // Fee per week — real across all weeks
-  const feeByWeek = useMemo(() => {
-    if (!allWeeks) return []
-    return allWeeks.map(w => ({
-      name: `W${w.week}`,
-      fee: Math.round(w.transactions?.reduce((s, t) => s + (t.fee || 0), 0) || 0),
-    }))
-  }, [allWeeks])
-
-  // Date range for this week
-  const dateRange = useMemo(() => {
-    const dates = weekData?.transactions?.map(t => t.createdAt).filter(Boolean) || []
-    if (!dates.length) return ''
-    const sorted = [...dates].sort()
-    return `${sorted[0]} → ${sorted[sorted.length - 1]}`
+  const causeMix = useMemo(() => {
+    const agg = {}
+    for (const exc of weekData.exceptions || []) {
+      const label = humanise(exc.hypothesis?.cause || exc.reason)
+      agg[label] = (agg[label] || 0) + 1
+    }
+    return Object.entries(agg)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
   }, [weekData])
 
-  const handleChatSend = () => {
-    if (!chatInput.trim()) return
-    setChatMessages(prev => [...prev, { role: 'user', text: chatInput.trim() }])
-    setChatInput('')
-    // Placeholder: backend integration in Phase 9
-    setTimeout(() => {
-      setChatMessages(prev => [
-        ...prev,
-        { role: 'agent', text: 'NL Report Builder integration is coming in Phase 9. The pipeline results above are real and computed from the matched data.' }
-      ])
-    }, 600)
-  }
+  const quarantine = (data.quarantine || []).filter((q) => q.batch === weekData.week)
 
   return (
-    <div className="flex flex-col gap-6 h-full">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-        {dateRange && (
-          <span className="text-xs text-muted bg-gray-100 px-3 py-1.5 rounded-md font-mono">{dateRange}</span>
-        )}
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
+          <p className="text-xs text-muted mt-0.5">
+            Week {weekData.week} · {weekData.dateRange.from} → {weekData.dateRange.to} ·
+            generated by {data.generatedFrom}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 bg-white border border-divider rounded-lg p-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                tab === t.id ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-divider pb-2">
-        <button
-          onClick={() => setTab('history')}
-          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-            tab === 'history' ? 'bg-card-bg text-gray-900' : 'text-muted hover:bg-gray-50'
-          }`}
-        >
-          Summary
-        </button>
-        <button
-          onClick={() => setTab('new')}
-          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-            tab === 'new' ? 'bg-card-bg text-gray-900' : 'text-muted hover:bg-gray-50'
-          }`}
-        >
-          Ask a Question
-        </button>
-      </div>
-
-      {tab === 'history' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Card 1 — Revenue by channel (real data) */}
-          <div className="bg-white rounded-xl border border-divider p-4 shadow-sm">
-            <h3 className="font-semibold text-gray-900 mb-1">Net Revenue by Channel</h3>
-            <p className="text-xs text-muted mb-3">Credit amounts credited to bank this week</p>
-            <div className="h-[140px] w-full mb-3">
+      {tab === 'money' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card
+            title="Auto-resolved vs escalated, per week"
+            subtitle="The system automates volume and escalates value. That is the guardrails, not a limitation."
+            className="lg:col-span-2 h-80 flex flex-col"
+          >
+            <div className="flex-1">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenueByChannel} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="channel" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <Tooltip formatter={(val) => formatCurrency(val)} cursor={{ fill: '#f3f4f6' }} />
-                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]}>
-                    {revenueByChannel.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHANNEL_COLORS[entry.raw] || '#3D4FE0'} />
+                <BarChart data={moneyByWeek} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E7E7EA" vertical={false} />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={AXIS} />
+                  <YAxis axisLine={false} tickLine={false} tick={AXIS}
+                         tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip {...TOOLTIP} formatter={(v) => inr(v, { whole: true })} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="auto" name="Auto-resolved" fill="#1FAA59" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="escalated" name="Escalated" fill="#3D4FE0" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Exception impact by channel" subtitle="This week only" className="h-80 flex flex-col">
+            <div className="flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={impactByChannel} layout="vertical" margin={{ left: 20, right: 12 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="channel" axisLine={false} tickLine={false}
+                         tick={{ ...AXIS, textTransform: 'capitalize' }} width={62} />
+                  <Tooltip {...TOOLTIP} formatter={(v) => inr(v, { whole: true })} />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {impactByChannel.map((entry) => (
+                      <Cell key={entry.channel} fill={CHANNEL_COLORS[entry.channel] || '#6B7280'} />
                     ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="text-xs text-muted">{dateRange}</div>
-          </div>
-
-          {/* Card 2 — Exception by cause (real data) */}
-          <div className="bg-white rounded-xl border border-divider p-4 shadow-sm">
-            <h3 className="font-semibold text-gray-900 mb-1">Exceptions by Cause</h3>
-            <p className="text-xs text-muted mb-3">Distribution across exception scenario types</p>
-            {exceptionByCause.length > 0 ? (
-              <div className="h-[140px] w-full mb-3 flex gap-3 items-center">
-                <div className="flex-shrink-0" style={{ width: 110, height: 110 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={exceptionByCause}
-                        dataKey="value"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={28}
-                        outerRadius={48}
-                      >
-                        {exceptionByCause.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex flex-col gap-1 min-w-0 flex-1">
-                  {exceptionByCause.slice(0, 5).map((e, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs">
-                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                      <span className="text-gray-600 truncate">{e.name}</span>
-                      <span className="ml-auto font-semibold text-gray-900">{e.value}</span>
-                    </div>
-                  ))}
-                  {exceptionByCause.length > 5 && (
-                    <div className="text-xs text-muted">+{exceptionByCause.length - 5} more</div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="h-[140px] flex items-center justify-center text-muted text-sm">No exceptions this week</div>
-            )}
-            <div className="text-xs text-muted">{dateRange}</div>
-          </div>
-
-          {/* Card 3 — Fees across all weeks (real data) */}
-          <div className="bg-white rounded-xl border border-divider p-4 shadow-sm">
-            <h3 className="font-semibold text-gray-900 mb-1">Platform Fees Trend</h3>
-            <p className="text-xs text-muted mb-3">Total fees deducted per week across all batches</p>
-            <div className="h-[140px] w-full mb-3">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={feeByWeek} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <Tooltip formatter={(val) => formatCurrency(val)} cursor={{ fill: '#f3f4f6' }} />
-                  <Line type="monotone" dataKey="fee" stroke="#1FAA59" strokeWidth={2.5} dot={{ r: 4, fill: '#1FAA59', stroke: 'white', strokeWidth: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="text-xs text-muted">Weeks 1–5</div>
-          </div>
+          </Card>
         </div>
       )}
 
-      {tab === 'new' && (
-        <div className="flex-1 bg-white rounded-2xl border border-divider overflow-hidden flex flex-col shadow-sm max-h-[600px]">
-          {/* Chat history */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {chatMessages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-12">
-                <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                  <BarChart2 size={22} className="text-primary" />
+      {tab === 'causes' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card title="Cause mix this week" subtitle="From the model's hypothesis, constrained to the frozen enum"
+                className="h-96 flex flex-col">
+            <div className="flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={causeMix} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                       innerRadius={55} outerRadius={100} paddingAngle={2}>
+                    {causeMix.map((entry, i) => (
+                      <Cell key={entry.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip {...TOOLTIP} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Where each exception went" subtitle="Outcome of the deterministic rule pass">
+            <div className="space-y-2 mt-2">
+              {Object.entries(
+                (weekData.exceptions || []).reduce((acc, e) => ({ ...acc, [e.outcome]: (acc[e.outcome] || 0) + 1 }), {})
+              )
+                .sort((a, b) => b[1] - a[1])
+                .map(([outcome, count]) => (
+                  <div key={outcome} className="flex items-center justify-between border-b border-divider py-2">
+                    <span className="text-sm text-gray-800">{humanise(outcome)}</span>
+                    <span className="font-bold text-gray-900">{count}</span>
+                  </div>
+                ))}
+            </div>
+            <p className="text-xs text-muted mt-4 leading-relaxed">
+              Overall auto-resolution precision across the corpus is{' '}
+              <span className="font-semibold text-gray-900">{pct(data.overallPrecision, 2)}</span>,
+              scored against the answer key the pipeline never reads.
+            </p>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'abstention' && (
+        <Card
+          title="Correct abstention"
+          subtitle="Two causes were held out of the corpus until late. The system had to refuse to automate them on first sight."
+        >
+          <div className="mt-3 space-y-3">
+            {(data.abstention || []).map((entry) => (
+              <div key={entry.cause} className={`rounded-xl border p-4 ${
+                entry.correct ? 'border-success/30 bg-success-light/30' : 'border-danger/40 bg-danger-light/30'
+              }`}>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  {entry.correct
+                    ? <ShieldOff size={15} className="text-success" />
+                    : <AlertOctagon size={15} className="text-danger" />}
+                  <span className="font-semibold text-gray-900 text-sm">{humanise(entry.cause)}</span>
+                  <StatusBadge variant="muted">first seen in batch {entry.first_batch}</StatusBadge>
+                  <StatusBadge variant={entry.correct ? 'success' : 'danger'}>
+                    {entry.abstention_rate_pct}% abstention
+                  </StatusBadge>
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-900 mb-1">Ask about your reconciliation data</p>
-                  <p className="text-sm text-muted max-w-xs">
-                    E.g. "Show me net revenue by channel", "Which cause has the most exceptions?", "Fee trend across weeks"
-                  </p>
-                </div>
-              </div>
-            )}
-            {chatMessages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-white rounded-tr-sm'
-                    : 'bg-card-bg text-gray-900 border border-divider rounded-tl-sm'
-                }`}>
-                  {msg.text}
-                </div>
+                <p className="text-sm text-gray-700">
+                  {entry.cases_on_first_sight} case(s) on first sight,{' '}
+                  <strong>{entry.auto_resolved_on_first_sight} auto-resolved</strong>.
+                  {' '}Across the whole corpus: {entry.total_cases} cases,{' '}
+                  {entry.auto_resolved_ever} auto-resolved.
+                </p>
               </div>
             ))}
           </div>
+          <p className="text-xs text-muted mt-4 leading-relaxed">
+            Abstention here is not a special case in the code. It falls out of the lifecycle —
+            a rule that has never been induced cannot fire — and of the guardrails, which refuse
+            to automate a counterparty claim or a cause on the never-auto-resolve list however
+            confident a rule is.
+          </p>
+        </Card>
+      )}
 
-          {/* Input bar */}
-          <div className="p-4 border-t border-divider bg-gray-50">
-            <div className="relative">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleChatSend()}
-                placeholder="Ask about your data..."
-                className="w-full bg-white border border-gray-300 rounded-xl pl-4 pr-12 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              />
-              <button
-                onClick={handleChatSend}
-                disabled={!chatInput.trim()}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Send size={14} />
-              </button>
+      {tab === 'quarantine' && (
+        <Card
+          title="Quarantined rows"
+          subtitle="Malformed input is parked with a reason and counted. Never dropped, never silently skipped."
+        >
+          {quarantine.length === 0 ? (
+            <p className="text-sm text-muted mt-3">No rows were refused in this batch.</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {quarantine.map((q) => (
+                <div key={q.rowId} className="flex items-start gap-3 border border-divider rounded-lg p-3">
+                  <FileWarning size={15} className="text-amber mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-semibold text-gray-900">{q.rowId}</span>
+                      <StatusBadge variant="amber">{humanise(q.reason)}</StatusBadge>
+                      <span className="text-xs text-muted">{q.table}</span>
+                    </div>
+                    <p className="text-xs text-gray-700 mt-1 font-mono break-words">{q.message}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        </div>
+          )}
+          <p className="text-xs text-muted mt-4">
+            {(data.quarantine || []).length} rows quarantined across all ten batches.
+          </p>
+        </Card>
       )}
     </div>
   )

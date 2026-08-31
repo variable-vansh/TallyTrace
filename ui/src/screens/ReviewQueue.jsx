@@ -1,29 +1,30 @@
-import React, { useState, useMemo } from 'react'
-import { CheckCircle, FileText, ArrowUpDown, ChevronDown, Shield, AlertTriangle, Send } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  AlertTriangle, CheckCircle, ChevronDown, Layers, Shield, Sparkles, User,
+} from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
-
-const formatINR = (amount) => {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount)
-}
-
-const getConfidenceVariant = (score) => {
-  if (score > 0.85) return 'success'
-  if (score > 0.7) return 'amber'
-  return 'danger'
-}
+import DecisionPath from '../components/DecisionPath'
+import {
+  inr, humanise, OUTCOME_LABEL, OUTCOME_VARIANT, confidenceVariant,
+} from '../lib/format'
 
 const CHANNELS = ['all', 'amazon', 'flipkart', 'myntra', 'offline', 'website']
-const BUCKET_FILTERS = [
-  { id: 'all', label: 'All Exceptions' },
-  { id: 'pending', label: 'Pending Review' },
-  { id: 'resolved', label: 'Resolved' },
-  { id: 'auto_resolved', label: 'Auto-Resolved' },
+const OUTCOMES = [
+  { id: 'all', label: 'All exceptions' },
+  { id: 'no_rule_matched', label: 'No rule matched' },
+  { id: 'shadow_prediction', label: 'Shadow predictions' },
+  { id: 'held_by_guardrail', label: 'Held by a guardrail' },
+  { id: 'auto_resolved', label: 'Auto-resolved' },
 ]
+// Stable empty defaults: `|| []` builds a new array every render and re-runs the memo.
+const NO_EXCEPTIONS = []
+const NO_PROPOSALS = []
+
 const SORTS = [
-  { id: 'amount-desc', label: 'Amount (High → Low)' },
-  { id: 'amount-asc', label: 'Amount (Low → High)' },
-  { id: 'confidence-desc', label: 'Confidence (High)' },
-  { id: 'confidence-asc', label: 'Confidence (Low)' },
+  { id: 'amount-desc', label: 'Amount (high → low)' },
+  { id: 'amount-asc', label: 'Amount (low → high)' },
+  { id: 'confidence-asc', label: 'Confidence (low first)' },
+  { id: 'confidence-desc', label: 'Confidence (high first)' },
 ]
 
 function FilterSelect({ value, options, onChange }) {
@@ -34,75 +35,102 @@ function FilterSelect({ value, options, onChange }) {
         onChange={(e) => onChange(e.target.value)}
         className="appearance-none bg-white border border-divider rounded-lg pl-3 pr-8 py-2 text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary cursor-pointer hover:border-gray-300 transition-colors"
       >
-        {options.map(opt => (
-          <option key={typeof opt === 'string' ? opt : opt.id} value={typeof opt === 'string' ? opt : opt.id}>
-            {typeof opt === 'string' ? (opt === 'all' ? 'All Channels' : opt.charAt(0).toUpperCase() + opt.slice(1)) : opt.label}
-          </option>
-        ))}
+        {options.map((opt) => {
+          const id = typeof opt === 'string' ? opt : opt.id
+          const label = typeof opt === 'string'
+            ? (opt === 'all' ? 'All channels' : opt.charAt(0).toUpperCase() + opt.slice(1))
+            : opt.label
+          return <option key={id} value={id}>{label}</option>
+        })}
       </select>
       <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
     </div>
   )
 }
 
-function DisputeDraftCard({ exc }) {
-  const [expanded, setExpanded] = useState(false)
+// One card instead of N exceptions. A rule that fired shows what it closed; a rule a
+// guardrail held shows what it would have closed and why it was not allowed to —
+// which is still one decision for a human instead of fourteen.
+function ProposalCard({ proposal }) {
+  const [open, setOpen] = useState(false)
+  // The card's own decision, held in the browser. This build renders a completed,
+  // scored run; a decision here does not write back to data/resolutions.json, so the
+  // card says what it *would* record rather than pretending it recorded it.
+  const [decision, setDecision] = useState(null)
+  const fired = proposal.outcome === 'auto_resolved'
+  const tone = decision === 'not_this_time' ? 'border-danger/40 bg-danger-light/30'
+    : fired ? 'border-success/30 bg-success-light/30'
+    : 'border-amber/40 bg-amber-light/30'
 
   return (
-    <div className="mt-3 border border-amber/30 bg-amber-light/30 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-amber-light/50 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <FileText size={14} className="text-amber" />
-          <span className="text-xs font-semibold text-amber-700">Dispute Draft Available</span>
+    <div className={`rounded-xl border ${tone} overflow-hidden`}>
+      <div className="p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            {fired ? <Shield size={15} className="text-success" /> : <AlertTriangle size={15} className="text-amber" />}
+            <StatusBadge variant="muted">{proposal.rule_id}</StatusBadge>
+            <StatusBadge variant={fired ? 'success' : 'amber'}>
+              {fired ? 'Applied' : 'Needs your call'}
+            </StatusBadge>
+            <StatusBadge variant="blue">{humanise(proposal.cause)}</StatusBadge>
+          </div>
+          <p className="font-semibold text-gray-900 text-sm leading-snug">{proposal.headline}</p>
+          <p className="text-gray-700 text-sm mt-0.5">{proposal.subhead}</p>
+          <p className="text-xs text-muted mt-1">
+            Learned from {proposal.learned_from.operator}&rsquo;s resolution in batch{' '}
+            {proposal.learned_from.batch}.
+          </p>
+          {proposal.held_because && (
+            <p className="text-xs text-amber-700 mt-1.5 font-medium">
+              Guardrail: {proposal.held_because}
+            </p>
+          )}
         </div>
-        <ChevronDown size={14} className={`text-amber transition-transform ${expanded ? 'rotate-180' : ''}`} />
-      </button>
-
-      {expanded && (
-        <div className="px-4 pb-4 pt-1 border-t border-amber/20">
-          <div className="bg-white rounded-lg border border-divider p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wide">Dispute Claim Draft</h4>
-              <StatusBadge variant="amber">Pending Submission</StatusBadge>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <span className="text-muted block mb-0.5">Order Reference</span>
-                <span className="font-mono font-medium text-gray-900">{exc.orderId}</span>
-              </div>
-              <div>
-                <span className="text-muted block mb-0.5">Dispute ID</span>
-                <span className="font-mono font-medium text-gray-900">{exc.disputeId || 'N/A'}</span>
-              </div>
-              <div>
-                <span className="text-muted block mb-0.5">Expected Amount</span>
-                <span className="font-medium text-gray-900">{formatINR(exc.amount)}</span>
-              </div>
-              <div>
-                <span className="text-muted block mb-0.5">Amount Received</span>
-                <span className="font-medium text-danger">{formatINR(exc.credit)}</span>
-              </div>
-            </div>
-
-            <div className="text-xs text-gray-700 bg-card-bg rounded-md p-3 leading-relaxed">
-              <p>To Whom It May Concern,</p>
-              <p className="mt-2">We are writing regarding a discrepancy identified on order <strong>{exc.orderId}</strong> on the <strong>{exc.channel}</strong> platform. Our records indicate an expected settlement of {formatINR(exc.amount)}, however the actual amount credited was {formatINR(exc.credit)}, resulting in a shortfall of <strong>{formatINR(Math.abs(exc.amount - exc.credit))}</strong>.</p>
-              <p className="mt-2">We request an investigation and resolution at the earliest.</p>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button className="flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors">
-                <Send size={12} />
-                Submit Claim
-              </button>
-              <button className="text-xs text-muted hover:text-gray-700 px-3 py-2 font-medium">
-                Edit Draft
-              </button>
-            </div>
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDecision('accept_all')}
+              className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-colors whitespace-nowrap shadow-sm text-white ${
+                fired ? 'bg-success hover:opacity-90' : 'bg-primary hover:bg-primary-hover'
+              }`}
+            >
+              {fired ? `Accepted (${proposal.rows})` : `Accept all (${proposal.rows})`}
+            </button>
+            <button
+              onClick={() => { setDecision('review_individually'); setOpen(true) }}
+              className="text-xs text-gray-700 hover:text-gray-900 px-3 py-2 font-medium whitespace-nowrap"
+            >
+              Review individually
+            </button>
+            <button
+              onClick={() => setDecision('not_this_time')}
+              className="text-xs text-muted hover:text-danger px-3 py-2 font-medium whitespace-nowrap"
+            >
+              Not this time
+            </button>
+          </div>
+          {decision && (
+            <p className="text-[11px] text-muted max-w-xs text-right leading-relaxed">
+              {decision === 'not_this_time'
+                ? `Would record ${proposal.cases} negative observation(s) against ${proposal.rule_id}, lowering its live precision and possibly retiring it.`
+                : decision === 'accept_all'
+                ? `Would record ${proposal.cases} confirmation(s) for ${proposal.rule_id} and resolve ${proposal.rows} row(s).`
+                : 'Deferred. Reviewing individually judges the rule neither way.'}
+            </p>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div className="px-5 pb-4 border-t border-divider/60 pt-3">
+          <p className="text-[11px] uppercase tracking-widest font-bold text-muted mb-2">
+            {proposal.case_ids.length} exception(s), {proposal.rows} settlement row(s)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {proposal.settlement_row_ids.map((id) => (
+              <span key={id} className="font-mono text-[11px] bg-white border border-divider rounded px-1.5 py-0.5">
+                {id}
+              </span>
+            ))}
           </div>
         </div>
       )}
@@ -110,196 +138,218 @@ function DisputeDraftCard({ exc }) {
   )
 }
 
-export default function ReviewQueue({ weekData }) {
-  const [channelFilter, setChannelFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('amount-desc')
-
-  const exceptions = weekData?.exceptions || []
-
-  const filtered = useMemo(() => {
-    let result = [...exceptions]
-
-    if (channelFilter !== 'all') result = result.filter(e => e.channel === channelFilter)
-    if (statusFilter !== 'all') result = result.filter(e => e.status === statusFilter)
-
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'amount-asc': return a.amount - b.amount
-        case 'confidence-desc': return b.confidence - a.confidence
-        case 'confidence-asc': return a.confidence - b.confidence
-        case 'amount-desc':
-        default: return b.amount - a.amount
-      }
-    })
-
-    return result
-  }, [exceptions, channelFilter, statusFilter, sortBy])
-
-  const pendingCount = exceptions.filter(e => e.status === 'pending').length
-  const resolvedCount = exceptions.filter(e => e.status === 'resolved' || e.status === 'auto_resolved').length
+function ExceptionCard({ exc }) {
+  const [open, setOpen] = useState(false)
+  const resolved = exc.outcome === 'auto_resolved'
+  // `trueCause` is the answer key, which the pipeline never sees. It reaches this file
+  // through the harness so a scored run can show its own false positives; it is
+  // labelled wherever it appears, because a product that could read this would not
+  // need any of the rest of the system.
+  const wrong = resolved && exc.trueCause && exc.trueCause !== exc.proposedCause
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Review Queue</h1>
-          <div className="flex items-center gap-1.5">
-            {pendingCount > 0 && (
-              <StatusBadge variant="danger">{pendingCount} pending</StatusBadge>
-            )}
-            <StatusBadge variant="success">{resolvedCount} resolved</StatusBadge>
-          </div>
+    <div className={`rounded-xl border bg-white overflow-hidden transition-colors ${
+      wrong ? 'border-danger/50' : resolved ? 'border-divider' : 'border-amber/40 shadow-sm'
+    }`}>
+      <div className="flex items-center justify-between px-5 py-3.5 bg-card-bg/50 border-b border-divider gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-wrap">
+          <span className="font-mono text-sm font-semibold text-gray-900">{exc.key}</span>
+          {exc.channel && <StatusBadge variant="muted" className="capitalize">{exc.channel}</StatusBadge>}
+          <StatusBadge variant={OUTCOME_VARIANT[exc.outcome] || 'muted'}>
+            {OUTCOME_LABEL[exc.outcome] || exc.outcome}
+          </StatusBadge>
+          {exc.ruleId && <StatusBadge variant="blue">{exc.ruleId}</StatusBadge>}
+          {wrong && (
+            <StatusBadge
+              variant="danger"
+              title={`The answer key says ${exc.trueCause}. Scoring only — the pipeline never reads it.`}
+            >
+              False positive (per answer key)
+            </StatusBadge>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-lg font-bold text-gray-900">{inr(exc.impact)}</span>
+          {resolved ? (
+            <div className="flex items-center gap-1 text-success">
+              <CheckCircle size={16} />
+              <span className="text-xs font-semibold">Auto-resolved</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 text-amber">
+              <AlertTriangle size={14} />
+              <span className="text-xs font-semibold">Needs a human</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Filters bar */}
+      <div className="px-5 py-4">
+        <div className="flex flex-col lg:flex-row gap-5">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="text-[10px] text-muted uppercase tracking-widest font-bold">
+                AI hypothesis
+              </span>
+              {exc.hypothesis && (
+                <>
+                  <StatusBadge variant={confidenceVariant(exc.hypothesis.confidence)}>
+                    {(exc.hypothesis.confidence * 100).toFixed(0)}% confidence
+                  </StatusBadge>
+                  <StatusBadge variant="muted">{humanise(exc.hypothesis.cause)}</StatusBadge>
+                </>
+              )}
+            </div>
+            {wrong && (
+              <p className="text-xs text-danger bg-danger-light/40 border border-danger/25 rounded-lg px-3 py-2 mb-2 leading-relaxed">
+                A rule closed this as <strong>{humanise(exc.proposedCause)}</strong> and the
+                answer key says <strong>{humanise(exc.trueCause)}</strong>. This is one of
+                the two near-misses planted in the dataset: same channel, same variance
+                band, different true cause. It is counted as a miss in the precision
+                number rather than hidden. The answer key is used for scoring only — the
+                pipeline never reads it.
+              </p>
+            )}
+            <p className="text-sm text-gray-700 leading-relaxed">
+              {exc.hypothesis
+                ? exc.hypothesis.text
+                : 'No hypothesis: the row was quarantined before the matcher could read it, and the frozen cause enum has no value for malformed input.'}
+            </p>
+            <p className="text-xs text-muted mt-2 font-mono">{exc.reason}</p>
+          </div>
+
+          <div className="w-full lg:w-80 flex-shrink-0">
+            {exc.humanResolution ? (
+              <div className="bg-success-light/50 border border-success/20 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <User size={13} className="text-success" />
+                  <span className="text-xs font-bold text-success uppercase tracking-wide">
+                    Operator resolution
+                  </span>
+                </div>
+                <p className="text-xs text-gray-700 leading-relaxed italic">
+                  “{exc.humanResolution.text}”
+                </p>
+                <p className="text-[11px] text-muted mt-2">
+                  {exc.humanResolution.operator} · {exc.humanResolution.at}
+                </p>
+              </div>
+            ) : (
+              <div className="bg-card-bg border border-divider rounded-lg p-4">
+                <span className="text-[10px] text-muted uppercase tracking-widest font-bold block mb-2">
+                  Resolve
+                </span>
+                <textarea
+                  placeholder="Describe how this was resolved, in your own words…"
+                  rows={2}
+                  className="text-sm px-3 py-2 border border-divider rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-white resize-none"
+                />
+                <button className="mt-2 bg-gray-900 hover:bg-gray-800 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors w-full">
+                  Mark resolved
+                </button>
+                <p className="text-[10px] text-muted mt-2 leading-relaxed">
+                  Free text only. The rule is induced from what you write, not from a builder.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={() => setOpen(!open)}
+          className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary-hover"
+        >
+          <Sparkles size={13} />
+          {open ? 'Hide decision path' : 'Show full decision path'}
+          <ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {open && (
+          <div className="mt-3 pt-3 border-t border-divider">
+            <DecisionPath exc={exc} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default function ReviewQueue({ weekData }) {
+  const [channelFilter, setChannelFilter] = useState('all')
+  const [outcomeFilter, setOutcomeFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('amount-desc')
+
+  const exceptions = weekData.exceptions ?? NO_EXCEPTIONS
+  const proposals = weekData.proposals ?? NO_PROPOSALS
+
+  const filtered = useMemo(() => {
+    let result = [...exceptions]
+    if (channelFilter !== 'all') result = result.filter((e) => e.channel === channelFilter)
+    if (outcomeFilter !== 'all') result = result.filter((e) => e.outcome === outcomeFilter)
+
+    const conf = (e) => (e.hypothesis ? e.hypothesis.confidence : -1)
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case 'amount-asc': return a.impact - b.impact
+        case 'confidence-desc': return conf(b) - conf(a)
+        case 'confidence-asc': return conf(a) - conf(b)
+        default: return b.impact - a.impact
+      }
+    })
+    return result
+  }, [exceptions, channelFilter, outcomeFilter, sortBy])
+
+  const pending = exceptions.filter((e) => e.outcome !== 'auto_resolved').length
+  const auto = exceptions.length - pending
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-2xl font-bold text-gray-900">Review Queue</h1>
+          <StatusBadge variant="danger">{pending} need a human</StatusBadge>
+          <StatusBadge variant="success">{auto} auto-resolved</StatusBadge>
+          <StatusBadge variant="blue">{weekData.stats.touchpoints} decisions</StatusBadge>
+        </div>
+      </div>
+
+      <p className="text-xs text-muted bg-card-bg border border-divider rounded-lg px-4 py-2.5 leading-relaxed">
+        This is a recorded run: the ten batches have already been reconciled, hypothesised
+        and scored, and the operator resolutions shown below are the ones in
+        <code className="mx-1 font-mono">data/resolutions.json</code> that the rules were
+        induced from. The controls say what they would record rather than writing back.
+      </p>
+
       <div className="flex items-center gap-3 flex-wrap">
-        <FilterSelect value={statusFilter} options={BUCKET_FILTERS} onChange={setStatusFilter} />
+        <FilterSelect value={outcomeFilter} options={OUTCOMES} onChange={setOutcomeFilter} />
         <FilterSelect value={channelFilter} options={CHANNELS} onChange={setChannelFilter} />
         <div className="h-5 w-px bg-divider" />
         <FilterSelect value={sortBy} options={SORTS} onChange={setSortBy} />
-
-        {(channelFilter !== 'all' || statusFilter !== 'all') && (
+        {(channelFilter !== 'all' || outcomeFilter !== 'all') && (
           <button
-            onClick={() => { setChannelFilter('all'); setStatusFilter('all') }}
+            onClick={() => { setChannelFilter('all'); setOutcomeFilter('all') }}
             className="text-xs text-primary hover:text-primary-hover font-medium"
           >
             Clear filters
           </button>
         )}
-
         <span className="text-xs text-muted ml-auto">{filtered.length} results</span>
       </div>
 
-      {/* Bulk fix callout */}
-      {weekData.bulkFixes && weekData.bulkFixes.length > 0 && (
+      {proposals.length > 0 && (
         <div className="flex flex-col gap-3">
-          {weekData.bulkFixes.map((bulkFix, idx) => (
-            <div key={idx} className="bg-primary/5 border border-primary/20 rounded-xl overflow-hidden flex relative">
-              <div className="w-1.5 bg-primary absolute left-0 top-0 bottom-0" />
-              <div className="p-5 flex-1 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ml-1.5">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Shield size={16} className="text-primary" />
-                    <StatusBadge variant="blue" className="uppercase tracking-wider">
-                      {bulkFix.channel}
-                    </StatusBadge>
-                    <span className="font-semibold text-gray-900 text-sm">Bulk Fix Available</span>
-                  </div>
-                  <p className="text-gray-700 text-sm">
-                    {bulkFix.description}
-                  </p>
-                </div>
-                <button className="bg-primary hover:bg-primary-hover text-white px-5 py-2.5 rounded-lg font-medium text-sm transition-colors whitespace-nowrap shadow-sm">
-                  Resolve All ({bulkFix.affectedCount})
-                </button>
-              </div>
-            </div>
-          ))}
+          <div className="flex items-center gap-2">
+            <Layers size={15} className="text-primary" />
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">
+              Batch proposals — {proposals.length} card{proposals.length === 1 ? '' : 's'} instead of{' '}
+              {proposals.reduce((s, p) => s + p.cases, 0)} exceptions
+            </h2>
+          </div>
+          {proposals.map((p) => <ProposalCard key={`${p.rule_id}-${p.outcome}`} proposal={p} />)}
         </div>
       )}
 
-      {/* Exception cards */}
       <div className="flex flex-col gap-4">
-        {filtered.map((exc, idx) => {
-          const isResolved = exc.status === 'resolved' || exc.status === 'auto_resolved'
-          const confidenceVariant = getConfidenceVariant(exc.confidence)
-
-          return (
-            <div key={idx} className={`rounded-xl border bg-white overflow-hidden transition-colors ${
-              isResolved ? 'border-divider' : 'border-amber/40 shadow-sm'
-            }`}>
-              {/* Card header */}
-              <div className="flex items-center justify-between px-5 py-3.5 bg-card-bg/50 border-b border-divider">
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-sm font-semibold text-gray-900">{exc.orderId}</span>
-                  <StatusBadge variant="muted" className="capitalize">{exc.channel}</StatusBadge>
-                  {exc.bucket === 'A' && <StatusBadge variant="blue">Bucket A</StatusBadge>}
-                  {exc.isNovel && <StatusBadge variant="amber">Novel</StatusBadge>}
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-lg font-bold text-gray-900">{formatINR(exc.amount)}</span>
-                  {isResolved && (
-                    <div className="flex items-center gap-1 text-success">
-                      <CheckCircle size={16} />
-                      <span className="text-xs font-semibold capitalize">{exc.status.replace('_', ' ')}</span>
-                    </div>
-                  )}
-                  {!isResolved && (
-                    <div className="flex items-center gap-1 text-amber">
-                      <AlertTriangle size={14} />
-                      <span className="text-xs font-semibold">Pending</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Card body */}
-              <div className="px-5 py-4">
-                <div className="flex gap-5">
-                  {/* Hypothesis */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-[10px] text-muted uppercase tracking-widest font-bold">AI Hypothesis</span>
-                      <StatusBadge variant={confidenceVariant}>
-                        {(exc.confidence * 100).toFixed(0)}% confidence
-                      </StatusBadge>
-                    </div>
-                    <p className="text-sm text-gray-700 leading-relaxed">
-                      {exc.hypothesis}
-                    </p>
-                  </div>
-
-                  {/* Resolution panel */}
-                  <div className="w-72 flex-shrink-0">
-                    {isResolved ? (
-                      <div className="bg-success-light/50 border border-success/20 rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle size={14} className="text-success" />
-                          <span className="text-xs font-bold text-success uppercase tracking-wide">
-                            {exc.status === 'auto_resolved' ? 'Auto-Resolved' : 'Resolution'}
-                          </span>
-                        </div>
-                        {exc.resolutionReason ? (
-                          <p className="text-xs text-gray-700 leading-relaxed">{exc.resolutionReason}</p>
-                        ) : exc.status === 'auto_resolved' ? (
-                          <p className="text-xs text-muted italic leading-relaxed">
-                            Matched a learned pattern — reason will be written back by the pattern store in Phase 5.
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted italic leading-relaxed">
-                            Resolution reason will be captured on human review in Phase 5.
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="bg-card-bg border border-divider rounded-lg p-4">
-                        <span className="text-[10px] text-muted uppercase tracking-widest font-bold block mb-2">Resolve</span>
-                        <div className="flex flex-col gap-2">
-                          <textarea
-                            placeholder="Describe how this was resolved..."
-                            rows={2}
-                            className="text-sm px-3 py-2 border border-divider rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-white resize-none"
-                          />
-                          <button className="bg-gray-900 hover:bg-gray-800 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors w-full">
-                            Mark Resolved
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Dispute draft section — shown for resolved exceptions with a dispute ID */}
-                {isResolved && exc.disputeId && (
-                  <DisputeDraftCard exc={exc} />
-                )}
-              </div>
-            </div>
-          )
-        })}
+        {filtered.map((exc) => <ExceptionCard key={exc.caseId} exc={exc} />)}
       </div>
 
       {filtered.length === 0 && (

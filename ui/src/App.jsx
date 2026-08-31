@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './index.css'
 import BatchSelector from './components/BatchSelector'
 import Sidebar from './components/Sidebar'
@@ -8,9 +8,10 @@ import Transactions from './screens/Transactions'
 import Patterns from './screens/Patterns'
 import Reports from './screens/Reports'
 
-// TODO: wire to the reconciliation pipeline's batch output.
-// Shape the screens expect: { weeks: [...], reviewRateTrend: [...] }
-const weeklyData = { weeks: [], reviewRateTrend: [] }
+// Everything on screen comes from one scored run: `make score && make ui-data`.
+// One source so the dashboard, the queue and the rules page cannot disagree with
+// each other or with the number the harness printed.
+const DATA_URL = `${import.meta.env.BASE_URL}tallytrace.json`
 
 const SCREENS = {
   dashboard: Dashboard,
@@ -20,11 +21,35 @@ const SCREENS = {
   reports: Reports,
 }
 
+function Placeholder({ title, body }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+      <p className="text-gray-900 font-medium">{title}</p>
+      <p className="text-gray-500 text-sm mt-1 max-w-md">{body}</p>
+    </div>
+  )
+}
+
 export default function App() {
   const [activeScreen, setActiveScreen] = useState('dashboard')
   const [selectedWeek, setSelectedWeek] = useState(0) // 0-indexed
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
 
-  const currentWeek = weeklyData.weeks[selectedWeek]
+  useEffect(() => {
+    let cancelled = false
+    fetch(DATA_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+        return response.json()
+      })
+      .then((payload) => { if (!cancelled) setData(payload) })
+      .catch((err) => { if (!cancelled) setError(err.message) })
+    return () => { cancelled = true }
+  }, [])
+
+  const weeks = data?.weeks || []
+  const currentWeek = weeks[selectedWeek]
   const ActiveComponent = SCREENS[activeScreen]
 
   return (
@@ -44,34 +69,38 @@ export default function App() {
         </div>
 
         <BatchSelector
-          weeks={weeklyData.weeks}
+          weeks={weeks}
           selectedWeek={selectedWeek}
           onSelectWeek={setSelectedWeek}
         />
       </header>
 
       <div className="flex flex-1 overflow-hidden relative z-10">
-        {/* Sidebar */}
         <Sidebar activeScreen={activeScreen} onNavigate={setActiveScreen} />
 
         {/* Content Area - Dark margin on right and bottom, rounded corners */}
         <main className="flex-1 flex overflow-hidden pr-6 pb-6 pt-0">
           <div className="flex-1 overflow-y-auto bg-[#f9fafb] rounded-[24px] text-gray-900 relative shadow-2xl">
             <div className="p-8 max-w-[1400px] min-h-full">
-              {currentWeek ? (
+              {error ? (
+                <Placeholder
+                  title="Could not load the run"
+                  body={`${error}. Run \`make score && make ui-data\` to produce ui/public/tallytrace.json.`}
+                />
+              ) : !data ? (
+                <Placeholder title="Loading the scored run…" body="Reading tallytrace.json." />
+              ) : currentWeek ? (
                 <ActiveComponent
                   weekData={currentWeek}
-                  allWeeks={weeklyData.weeks}
+                  allWeeks={weeks}
                   selectedWeek={selectedWeek}
-                  reviewRateTrend={weeklyData.reviewRateTrend}
+                  data={data}
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                  <p className="text-gray-900 font-medium">No batches loaded</p>
-                  <p className="text-gray-500 text-sm mt-1">
-                    Connect the pipeline output to <code>weeklyData</code> in App.jsx.
-                  </p>
-                </div>
+                <Placeholder
+                  title="No batches in this run"
+                  body="Run `make demo` to generate the corpus and score it."
+                />
               )}
             </div>
           </div>

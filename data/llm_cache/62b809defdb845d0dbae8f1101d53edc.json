@@ -1,0 +1,35 @@
+{
+  "key": "62b809defdb845d0dbae8f1101d53edc",
+  "model": "claude-opus-5",
+  "request": {
+    "system": "You turn a bookkeeper's plain-language note into a structured, generalisable rule.\n\nYou are given (a) the note they typed while resolving one reconciliation exception and (b) the features of the row they were looking at. Return the rule their note implies.\n\nRules you must follow:\n- The rule must describe a *pattern*, never a transaction. Never reference an order id, an entity id, a UTR or a settlement id anywhere, including in plain_words.\n- Choose the cause from the enum in the schema. Never invent one.\n- resolution_class must be the class that cause belongs to: internal_fix for the seller's own books being wrong or behind, counterparty_claim when an external party owes money, tax_review for TCS/TDS, investigate when nobody can yet say.\n- Set a band only where the note supports one. A note about a rate that is out by a fixed percentage implies a tight variance band around that percentage. A note about a deduction arriving a cycle or two later implies a lag_window_days band and no variance band at all.\n- Bands should be tight enough to exclude a different phenomenon and wide enough to cover normal rounding. Prefer a band that would not fire on a number twice the size.\n- action.type: update_ledger_rate when the seller's master rate is stale and the note says what it should be; accept_timing_difference when the money is right and only the cycle is wrong; write_off_variance for small explained differences; flag_for_claim when an external party owes money; none when the note does not imply an action.\n- plain_words is what the operator will see on the rules page. One sentence, no ids.",
+    "tool": "record_rule",
+    "user": "The bookkeeper wrote this while resolving an exception:\n\n    \"Same story as Myntra. Amazon has been charging 21.5% since the referral fee revision and our sheet is stuck at 20%. Nothing wrong with their maths, ours is stale. Fix the Amazon rate at 21.5%.\"\n\nThe kind of row they were looking at:\n\nmatcher reason code : fee_variance_outside_tolerance\nchannel             : amazon\nmoney direction     : short\nmoney in question   : tens of rupees\nfee variance        : 7.5%\nnet variance        : -2.4%\n\nWhat is the generalisable rule?"
+  },
+  "response": {
+    "action": {
+      "field": "expected_commission_rate",
+      "type": "update_ledger_rate",
+      "value": 0.215
+    },
+    "cause": "commission_rate_stale",
+    "channel": "amazon",
+    "direction": "short",
+    "lag_window_days": null,
+    "net_variance_band_pct": null,
+    "plain_words": "Amazon has charged 21.5% referral fee since the revision while the master rate sheet still says 20%, leaving the fee about 7.5% over expectation.",
+    "reason_code": "fee_variance_outside_tolerance",
+    "resolution_class": "internal_fix",
+    "transaction_type": null,
+    "variance_band_pct": [
+      6.8,
+      8.2
+    ]
+  },
+  "source": "transcript",
+  "task": "induction",
+  "usage": {
+    "input_tokens": 593,
+    "output_tokens": 149
+  }
+}

@@ -3,7 +3,7 @@ PIP := .venv/bin/pip
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv generate verify-clean reconcile score test typecheck check clean
+.PHONY: help venv generate verify-clean reconcile learn llm-fixtures resolutions ui-data demo score test typecheck check clean
 
 help:  ## Show the available targets
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -22,18 +22,33 @@ verify-clean:  ## Prove the clean base reconciles at 100% before anything is inj
 reconcile:  ## Run the deterministic matcher across all ten batches
 	$(PY) -m pipeline.run
 
+learn:  ## Run the learning loop across the ten batches; writes data/rules.json + data/learning.json
+	$(PY) -m pipeline.learn
+
+resolutions:  ## Rebuild the operator work log from tools/operator_notes.py
+	$(PY) -m tools.write_resolutions
+
+llm-fixtures:  ## Populate data/llm_cache. With ANTHROPIC_API_KEY set this calls the API.
+	$(PY) -m tools.write_llm_fixtures
+
+ui-data:  ## Build the JSON the React UI reads
+	$(PY) -m tools.build_ui_data
+
 score:  ## Score the pipeline against the answer key; writes EXCEPTIONS.md + data/score.json
 	$(PY) -m harness.score
+
+demo: generate score ui-data  ## Everything, end to end. Run it twice: the numbers do not move.
 
 test:  ## Run the test suite
 	$(PY) -m pytest tests/ -q
 
 typecheck:  ## mypy over the source tree
-	$(PY) -m mypy generator pipeline harness
+	$(PY) -m mypy generator pipeline harness tools
 
 check: verify-clean test typecheck  ## Everything a checkpoint has to pass
 
 clean:  ## Remove generated data and caches
 	rm -rf data/generated/batch_* data/truth/*.json data/reconciliation.json data/score.json
+	rm -f data/learning.json data/rules.json ui/public/tallytrace.json
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 	rm -rf .pytest_cache .mypy_cache

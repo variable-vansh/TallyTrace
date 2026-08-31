@@ -23,23 +23,31 @@ from typing import Any
 
 from harness import aging as aging_module
 from harness import report
+from harness.aging import Aging
 from harness.attribution import CauseConfusion, RowOutcome, attribute, confusion, silent_clears
 from harness.cost import Pricing, pricing_from
-from harness.aging import Aging
 from harness.exceptions import open_exceptions, render as render_exceptions
+from harness.learning import LearningScore, auto_resolutions
+from harness.learning import score as score_learning
 from harness.metrics import (
     AutoResolution,
     BatchMetrics,
     auto_resolution_precision,
     batch_metrics,
+    pct,
     quarantine_summary,
     resolved_row_keys,
 )
 from harness.truth import AnswerKey, load_answer_key
+from pipeline.cases import FindingLog
 from pipeline.config import CONFIG_DIR, REPO_ROOT, generation, load_yaml, thresholds
-from pipeline.llm.usage import UsageLedger
+from pipeline.learn import LearningRun, run_learning_batch
+from pipeline.llm.client import client_from
 from pipeline.loader import load_batch
 from pipeline.matcher import BatchResult, match_config_from
+from pipeline.rules import resolutions as operator_log
+from pipeline.rules import store as rule_store
+from pipeline.rules.models import RuleState
 from pipeline.run import OpenBook, run_batch
 
 SCORE_JSON = REPO_ROOT / "data" / "score.json"
@@ -59,6 +67,8 @@ class Score:
     key: AnswerKey
     pricing: Pricing
     proposals: list[AutoResolution]
+    learning: LearningScore
+    run: LearningRun
 
     def new_findings(self, result: BatchResult) -> list[Any]:
         """Exceptions raised for the first time in this batch. See harness/aging.py."""
@@ -87,44 +97,62 @@ def _cause_by_row(key: AnswerKey) -> dict[tuple[str, str], str]:
 
 
 def _reconcile_all(
-    generated_dir: Path | None,
-) -> tuple[list[BatchResult], list[tuple[int, float]]]:
-    """Reconcile every batch in order, timing each. Returns results and (rows, seconds)."""
+    generated_dir: Path | None, cache_dir: Path | None
+) -> tuple[LearningRun, list[tuple[int, float]]]:
+    """Run the whole loop batch by batch, timing each.
+
+    The learning loop *contains* the matcher -- it reconciles, queues, hypothesises,
+    applies rules and captures resolutions in one pass -- so the harness drives that
+    rather than reconciling separately and bolting the learning numbers on beside it.
+    Two passes would let the two halves disagree about which rows existed.
+    """
+    record = LearningRun()
+    timings: list[tuple[int, float]] = []
     cfg = match_config_from(thresholds())
     book = OpenBook.empty()
-    results: list[BatchResult] = []
-    timings: list[tuple[int, float]] = []
+    finding_log = FindingLog()
+    log = operator_log.load()
+
+    pricing_cfg = load_yaml(CONFIG_DIR / "pricing.yaml")
+    client = client_from(
+        str(pricing_cfg["model"]),
+        cache_dir=cache_dir,
+        ledger=record.ledger,
+        chars_per_token=Decimal(str(pricing_cfg["estimated_chars_per_token"])),
+    )
 
     for batch in range(1, int(generation()["batch_count"]) + 1):
         tables = load_batch(batch, generated_dir)
         started = time.perf_counter()
-        result = run_batch(tables, book, cfg)
+        learned = run_learning_batch(
+            tables, book, cfg, record.store, client, log, finding_log
+        )
         timings.append((tables.rows_read, time.perf_counter() - started))
-        results.append(result)
-    return results, timings
+        record.batches.append(learned)
+    record.tokens_estimated = client.tokens_estimated
+    return record, timings
 
 
 def run(
     generated_dir: Path | None = None,
     truth_dir: Path | None = None,
-    ledger: UsageLedger | None = None,
-    proposals: list[AutoResolution] | None = None,
+    cache_dir: Path | None = None,
 ) -> Score:
-    """Reconcile every batch, timing each, then score against the answer key.
+    """Reconcile and learn across every batch, timing each, then score against the key.
 
-    ``ledger`` and ``proposals`` are the two seams checkpoint 3 fills: the first
-    collects token usage from the LLM client, the second carries the rows a learned
-    rule resolved without a human. Both are empty today and both are scored today,
-    so neither arrives as an untested code path next to a new model.
+    Token usage and auto-resolutions are read off the learning run rather than passed
+    in: checkpoint 2 left both as parameters so the scoring path could be exercised
+    before anything filled them, and this is the checkpoint that fills them.
     """
     pricing = pricing_from(load_yaml(CONFIG_DIR / "pricing.yaml"))
-    usage = ledger or UsageLedger()
-    results, timings = _reconcile_all(generated_dir)
+    record, timings = _reconcile_all(generated_dir, cache_dir)
+    results = record.results
+    usage = record.ledger
+    accepted = auto_resolutions(record)
 
     # Aging needs the whole corpus before any batch's queue can be sized: whether a
     # finding is new depends on whether an earlier batch already raised it.
     aging = aging_module.index(results)
-    accepted = proposals or []
     metrics = [
         batch_metrics(
             result,
@@ -142,6 +170,7 @@ def run(
 
     key = load_answer_key(truth_dir)
     outcomes = attribute(results, key)
+    held_out = sorted(generation()["held_out"])
     return Score(
         results=results,
         metrics=metrics,
@@ -151,6 +180,8 @@ def run(
         key=key,
         pricing=pricing,
         proposals=accepted,
+        learning=score_learning(record, key, held_out),
+        run=record,
     )
 
 
@@ -193,6 +224,43 @@ def _quarantine_json(score: Score) -> dict[str, Any]:
     return {"total": summary.total, "by_reason": dict(summary.by_reason)}
 
 
+def _totals(score: Score, precision: Decimal | None) -> dict[str, Any]:
+    """The single-number summary the UI header and the chart read."""
+    return {
+        "records_processed": sum(m.records_processed for m in score.metrics),
+        "settlement_rows": sum(m.settlement_rows for m in score.metrics),
+        "open_exceptions": score.open_exception_count,
+        "aged_findings": sum(m.aged_findings for m in score.metrics),
+        "open_exception_impact_inr": str(score.open_exception_impact),
+        "injected_rows": score.key.affected_row_count,
+        "injected_impact_inr": str(score.key.total_impact_inr),
+        "silently_cleared_rows": sum(o.silently_cleared for o in score.outcomes),
+        "auto_resolutions_attempted": len(score.proposals),
+        "review_rate_series_pct": [str(m.net_review_rate) for m in score.metrics],
+        "matcher_review_rate_series_pct": [str(m.review_rate) for m in score.metrics],
+        "touchpoint_rate_series_pct": [
+            str(pct(learned.human_touchpoints, metric.settlement_rows))
+            for learned, metric in zip(score.learning.batches, score.metrics)
+        ],
+        "auto_resolution_precision_pct": None if precision is None else str(precision),
+        "auto_resolution_precision_series_pct": [
+            None if b.auto_resolution_precision is None else str(b.auto_resolution_precision)
+            for b in score.learning.batches
+        ],
+        "rules_total": len(score.run.store.rules),
+        "rules_active": sum(1 for r in score.run.store.rules if r.state is RuleState.ACTIVE),
+        "rules_retired": sum(1 for r in score.run.store.rules if r.state is RuleState.RETIRED),
+        "rupees_auto_resolved": str(
+            sum((b.rupees_auto_resolved for b in score.learning.batches), ZERO)
+        ),
+        "rupees_escalated": str(
+            sum((b.rupees_escalated for b in score.learning.batches), ZERO)
+        ),
+        "llm_model": score.pricing.model,
+        "llm_tokens_estimated": score.run.tokens_estimated,
+    }
+
+
 def to_json(score: Score) -> dict[str, Any]:
     """The artifact the UI and the chart consume.
 
@@ -203,20 +271,9 @@ def to_json(score: Score) -> dict[str, Any]:
     precision = auto_resolution_precision(score.proposals, _cause_by_row(score.key))
     return {
         "batches": [metric.to_json() for metric in score.metrics],
-        "totals": {
-            "records_processed": sum(m.records_processed for m in score.metrics),
-            "settlement_rows": sum(m.settlement_rows for m in score.metrics),
-            "open_exceptions": score.open_exception_count,
-            "aged_findings": sum(m.aged_findings for m in score.metrics),
-            "open_exception_impact_inr": str(score.open_exception_impact),
-            "injected_rows": score.key.affected_row_count,
-            "injected_impact_inr": str(score.key.total_impact_inr),
-            "silently_cleared_rows": sum(o.silently_cleared for o in score.outcomes),
-            "auto_resolutions_attempted": len(score.proposals),
-            "review_rate_series_pct": [str(m.net_review_rate) for m in score.metrics],
-            "auto_resolution_precision_pct": None if precision is None else str(precision),
-            "llm_model": score.pricing.model,
-        },
+        "totals": _totals(score, precision),
+        "learning": score.learning.to_json(),
+        "rules": score.run.store.to_json()["rules"],
         "cause_confusion": _confusion_json(score),
         "silent_clears": _silent_clear_json(score),
         "quarantine": _quarantine_json(score),
@@ -232,11 +289,16 @@ def to_text(score: Score) -> str:
     precision = auto_resolution_precision(score.proposals, _cause_by_row(score.key))
     return report.render(
         [
-            report.throughput(score.metrics, score.pricing),
+            report.throughput(score.metrics, score.pricing, score.run.tokens_estimated),
             report.accuracy(score.metrics),
             report.confusion_table(score.confusion, score.key),
             report.silent_clear_table(silent_clears(score.outcomes), score.key),
             report.auto_resolution(precision, len(score.proposals)),
+            report.learning(
+                list(score.learning.batches), score.metrics, score.learning.overall_precision
+            ),
+            report.abstention(list(score.learning.abstentions)),
+            report.rules(score.run.store, list(score.learning.rule_truth)),
             report.honesty(quarantine, score.open_exception_count, score.open_exception_impact),
         ]
     )
@@ -248,7 +310,11 @@ def main() -> int:
 
     SCORE_JSON.write_text(json.dumps(to_json(score), indent=2) + "\n", encoding="utf-8")
     EXCEPTIONS_MD.write_text(render_exceptions(score.results, score.aging), encoding="utf-8")
-    print(f"\nwrote {SCORE_JSON.relative_to(REPO_ROOT)} and EXCEPTIONS.md")
+    # The rule store is written here as well as by `make learn`, so one command
+    # produces every artifact the UI and the tests read and they all describe the
+    # same run rather than two runs that happen to agree.
+    rule_store.save(score.run.store)
+    print(f"\nwrote {SCORE_JSON.relative_to(REPO_ROOT)}, data/rules.json and EXCEPTIONS.md")
     return 0
 
 

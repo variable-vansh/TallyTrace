@@ -63,3 +63,17 @@ def truth_dir() -> Path:
     if not (directory / "manifest.json").exists():
         pytest.skip("run `make generate` first")
     return directory
+
+
+@pytest.fixture(scope="session")
+def scored():
+    """One scored run of the whole corpus, shared across the learning tests.
+
+    The run reconciles ten batches, hypothesises, applies rules and scores against the
+    answer key. It is deterministic and takes about a third of a second, but every
+    test that wants it wants the *same* one -- two runs would be identical anyway, and
+    sharing makes that assumption explicit rather than incidental.
+    """
+    from harness.score import run
+
+    return run()

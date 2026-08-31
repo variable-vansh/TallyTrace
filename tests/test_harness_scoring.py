@@ -18,7 +18,14 @@ import pytest
 from harness import aging as aging_module
 from harness.attribution import attribute, confusion, silent_clears
 from harness.exceptions import open_exceptions, render as render_exceptions
-from harness.metrics import AutoResolution, auto_resolution_precision, pct, quarantine_summary
+from harness.metrics import (
+    AutoResolution,
+    auto_resolution_precision,
+    batch_metrics,
+    pct,
+    quarantine_summary,
+    resolved_row_keys,
+)
 from harness.score import Score, run, to_json, to_text
 from harness.truth import load_answer_key
 from pipeline.config import generation
@@ -145,39 +152,61 @@ def test_the_silent_clear_report_states_how_close_a_band_came_to_firing(score: S
 # --------------------------------------------------------------------------- #
 
 
-def test_precision_over_no_attempts_is_undefined_not_perfect(score: Score) -> None:
-    assert score.proposals == []
-    assert to_json(score)["totals"]["auto_resolution_precision_pct"] is None
+def test_precision_over_no_attempts_is_undefined_not_perfect() -> None:
+    """A precision of 1.0 over nothing is the most flattering way to say nothing
+    happened. Checkpoint 3 filled this path with real auto-resolutions, so the empty
+    case is asserted on the function rather than on a run that no longer has one."""
+    assert auto_resolution_precision([], {}) is None
+
+
+def test_the_scored_run_now_has_auto_resolutions_to_score(score: Score) -> None:
+    """The seam checkpoint 2 left is filled. If this ever empties again, every
+    precision number in the report silently becomes 'undefined' rather than wrong,
+    which is exactly the kind of quiet regression the harness is for."""
+    assert score.proposals, "the learning loop resolved nothing"
+    assert to_json(score)["totals"]["auto_resolution_precision_pct"] is not None
 
 
 def test_the_net_review_rate_falls_when_a_rule_resolves_rows(
     generated_dir: Path, truth_dir: Path
 ) -> None:
-    """The series checkpoint 3's chart plots, driven here before anything can plot it.
+    """The series checkpoint 3's chart plots, driven at the unit that computes it.
 
     ``review_rate`` is the matcher's own number and must not move; ``net_review_rate``
     is what is left after learned rules fire and must. Two columns is the point: a
     decline produced by widening a tolerance looks identical to one produced by
     learning if there is only one.
+
+    Driven through ``batch_metrics`` with a hand-built resolved set rather than
+    through a full run, so it keeps testing the arithmetic even as the learning loop
+    that feeds it changes.
     """
     baseline = run(generated_dir, truth_dir)
+    result = baseline.results[3]
+    metric = baseline.metrics[3]
     flagged = [
-        AutoResolution(result.batch, verdict.table, verdict.row_id, "commission_rate_stale")
-        for result in baseline.results
+        verdict.row_id
         for verdict in result.by_table("settlement_report")
         if verdict.reason is Reason.FEE_OUTSIDE_TOLERANCE
     ]
     assert flagged, "nothing to resolve, so the test would pass vacuously"
 
-    resolved = run(generated_dir, truth_dir, proposals=flagged)
-    for before, after in zip(baseline.metrics, resolved.metrics):
-        assert after.review_rate == before.review_rate, "the matcher's number is untouched"
-        assert after.net_review_rate <= before.review_rate
-    assert any(
-        after.net_review_rate < before.review_rate
-        for before, after in zip(baseline.metrics, resolved.metrics)
-    ), "auto-resolution left the plotted series unchanged"
-    assert to_json(resolved)["totals"]["auto_resolutions_attempted"] == len(flagged)
+    proposals = [
+        AutoResolution(result.batch, "settlement_report", row_id, "commission_rate_stale")
+        for row_id in flagged
+    ]
+    resolved = batch_metrics(
+        result,
+        records_processed=metric.records_processed,
+        usage=metric.usage,
+        pricing=baseline.pricing,
+        aging=baseline.aging,
+        resolved=resolved_row_keys(proposals),
+        seconds=metric.seconds,
+    )
+    assert resolved.review_rate == metric.review_rate, "the matcher's number is untouched"
+    assert resolved.auto_resolved == len(flagged)
+    assert resolved.net_review_rate < resolved.review_rate
 
 
 def test_the_review_rate_series_is_published_for_the_chart(score: Score) -> None:

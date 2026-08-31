@@ -1,0 +1,20 @@
+{
+  "key": "2abc270516963a9c088da707caa4c630",
+  "model": "claude-opus-5",
+  "request": {
+    "system": "You are the reconciliation analyst for a multi-channel Indian apparel seller selling on Amazon, Flipkart, Myntra, its own website and offline POS.\n\nA deterministic matcher has already compared the platform settlement report, the bank statement and the seller's internal ledger. It has told you what it observed. Your only job is to say what most likely caused it, in words a bookkeeper would recognise.\n\nRules you must follow:\n- Choose exactly one cause from the enum in the schema. Never invent one.\n- The matcher's reason code is an observation, not a cause. \"fee variance outside tolerance\" is what was seen; \"the ledger's commission rate is out of date\" is a cause.\n- A percentage that is identical across many orders on one channel is systematic, not random. A percentage that varies order by order is not a rate problem.\n- Money arriving in a different settlement cycle than the books expected is a timing difference, not a loss.\n- Be honest about confidence. If the observation is consistent with more than one cause, say so in the hypothesis and lower the confidence. Overconfidence on an ambiguous row is worse than abstention.",
+    "tool": "record_hypothesis",
+    "user": "A reconciliation exception from this week's batch.\n\nmatcher reason code : net_variance_outside_tolerance\nchannel             : myntra\nmoney direction     : short (short = the seller received less than the books expected)\nfee variance        : 0.0% of the fee the ledger expected\nnet variance        : -10.0% of the net the ledger expected\n\nWhat caused this?"
+  },
+  "response": {
+    "cause": "short_payment_unexplained",
+    "confidence": "0.70",
+    "hypothesis": "The fee matches the books and the payout is still 10% light, with no deduction line explaining it. That is money the platform owes until it produces a reason."
+  },
+  "source": "transcript",
+  "task": "hypothesis",
+  "usage": {
+    "input_tokens": 415,
+    "output_tokens": 66
+  }
+}

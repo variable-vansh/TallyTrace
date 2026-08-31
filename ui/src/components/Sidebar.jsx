@@ -4,7 +4,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'review', label: 'Review Queue', icon: ListChecks },
   { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
-  { id: 'patterns', label: 'Patterns', icon: Brain },
+  { id: 'patterns', label: 'Rules', icon: Brain },
   { id: 'reports', label: 'Reports', icon: FileBarChart },
 ]
 
