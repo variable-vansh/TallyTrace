@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# Node / UI
+node_modules/
+ui/dist/
+
+# OS
+.DS_Store
+
+# Local env
+.env
