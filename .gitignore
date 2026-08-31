@@ -15,3 +15,8 @@ ui/dist/
 
 # Local env
 .env
+
+# Derived reconciliation output; regenerate with `make reconcile` / `make score`.
+# EXCEPTIONS.md is committed on purpose: it is the honest half of the result.
+data/reconciliation.json
+data/score.json

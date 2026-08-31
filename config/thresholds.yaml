@@ -6,6 +6,11 @@ matching:
   rounding_tolerance_inr: 1.00
   date_window_days: 21
   fee_variance_tolerance_pct: 0.5
+  # Bounds on the N:1 residual search. Deliberately small: the job is to name the
+  # one or two rows a bank credit does not account for, not to solve subset-sum.
+  subset_search:
+    max_subset_size: 3
+    max_candidates: 60
 
 auto_resolution:
   max_variance_inr: 500.00          # above this, never auto-resolve

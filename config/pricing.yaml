@@ -1,0 +1,18 @@
+# LLM pricing. Nothing uses this yet -- checkpoint 3 makes the first call -- but the
+# harness reports rupee cost per reconciled transaction, and that arithmetic is
+# exercised now rather than bolted on next to the model that changes the number.
+#
+# Anthropic first-party API rates, USD per million tokens.
+
+model: claude-opus-5
+
+usd_per_mtok:
+  input: 5.00
+  output: 25.00
+  cache_read: 0.50            # ~0.1x input
+  cache_write: 6.25           # ~1.25x input
+
+# Conversion for the rupee-denominated cost metric. A rate, not a market quote:
+# it is here so the number in the report is stated in one currency rather than
+# silently mixing two.
+usd_to_inr: 88.00
