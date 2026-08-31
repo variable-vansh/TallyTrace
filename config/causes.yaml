@@ -1,0 +1,81 @@
+# THE FROZEN ENUM.
+# Nothing anywhere in the system may invent a cause outside this list.
+# The LLM is constrained to it, the generator draws from it, the harness scores
+# against it. Adding a row here is a spec change, not an implementation detail.
+#
+# resolution_class drives routing:
+#   internal_fix        -> learning loop
+#   counterparty_claim  -> claims queue
+#   tax_review          -> always human
+#   investigate         -> always human
+
+causes:
+  - cause: commission_rate_stale
+    resolution_class: internal_fix
+    description: ledger's expected rate is out of date
+
+  - cause: commission_slab_change
+    resolution_class: internal_fix
+    description: platform moved the item to a different slab
+
+  - cause: fee_mismatch_other
+    resolution_class: internal_fix
+    description: shipping / fulfilment / payment fee differs
+
+  - cause: rto_reversal_later_cycle
+    resolution_class: internal_fix
+    description: RTO deduction lands in a later settlement than the sale
+
+  - cause: refund_timing_lag
+    resolution_class: internal_fix
+    description: refund deducted in a different batch than booked
+
+  - cause: settlement_lag_crossing_batch
+    resolution_class: internal_fix
+    description: sale in batch N settles in batch N+k
+
+  - cause: rounding_variance
+    resolution_class: internal_fix
+    description: paise-level
+
+  - cause: duplicate_settlement_row
+    resolution_class: internal_fix
+    description: same transaction emitted twice
+
+  - cause: tcs_timing_mismatch
+    resolution_class: tax_review
+    description: TCS timing differs from expectation
+
+  - cause: tds_timing_mismatch
+    resolution_class: tax_review
+    description: TDS timing differs from expectation
+
+  - cause: weight_dispute_hold
+    resolution_class: counterparty_claim
+    description: payment held pending dispute, not lost
+
+  - cause: missing_settlement_row
+    resolution_class: counterparty_claim
+    description: order in ledger, absent from settlement
+
+  - cause: short_payment_unexplained
+    resolution_class: counterparty_claim
+    description: net short with no identifiable cause
+
+  - cause: chargeback_deduction
+    resolution_class: counterparty_claim
+    description: dispute deduction
+
+  - cause: promo_cofunding_deduction
+    resolution_class: counterparty_claim
+    description: platform promo cost shared without notice
+
+  - cause: bank_credit_unmatched
+    resolution_class: investigate
+    description: credit with no settlement counterpart
+
+resolution_classes:
+  - internal_fix
+  - counterparty_claim
+  - tax_review
+  - investigate

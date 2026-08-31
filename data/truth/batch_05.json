@@ -1,0 +1,218 @@
+{
+  "batch": 5,
+  "row_counts": {
+    "settlement_rows": 114,
+    "malformed_rows": 0,
+    "bank_rows": 17,
+    "ledger_rows": 109
+  },
+  "injections": [
+    {
+      "batch": 5,
+      "cause": "commission_rate_stale",
+      "affected_row_ids": [
+        "st_000324",
+        "st_000354",
+        "st_000368",
+        "st_000370",
+        "st_000386",
+        "st_000387",
+        "st_000406",
+        "st_000416"
+      ],
+      "affected_order_ids": [
+        "ord_000308",
+        "ord_000336",
+        "ord_000349",
+        "ord_000351",
+        "ord_000367",
+        "ord_000368",
+        "ord_000387",
+        "ord_000397"
+      ],
+      "true_impact_inr": "675.98",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "myntra",
+        "stale_rate": "0.25",
+        "actual_rate": "0.272"
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "commission_rate_stale",
+      "affected_row_ids": [
+        "st_000342",
+        "st_000424",
+        "st_000427",
+        "st_000428"
+      ],
+      "affected_order_ids": [
+        "ord_000325",
+        "ord_000404",
+        "ord_000407",
+        "ord_000408"
+      ],
+      "true_impact_inr": "214.87",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "amazon",
+        "stale_rate": "0.20",
+        "actual_rate": "0.215"
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "fee_mismatch_other",
+      "affected_row_ids": [
+        "st_000396"
+      ],
+      "affected_order_ids": [
+        "ord_000377"
+      ],
+      "true_impact_inr": "134.52",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "flipkart"
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "refund_timing_lag",
+      "affected_row_ids": [
+        "st_001147",
+        "st_001148",
+        "st_001149",
+        "st_001150",
+        "st_001151"
+      ],
+      "affected_order_ids": [
+        "ord_000324",
+        "ord_000350",
+        "ord_000383",
+        "ord_000389",
+        "ord_000400"
+      ],
+      "true_impact_inr": "11020.10",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "amazon",
+        "booked_batch": 5,
+        "deducted_batch": 7
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "rounding_variance",
+      "affected_row_ids": [
+        "st_000327",
+        "st_000348",
+        "st_000371",
+        "st_000410"
+      ],
+      "affected_order_ids": [
+        "ord_000311",
+        "ord_000331",
+        "ord_000352",
+        "ord_000391"
+      ],
+      "true_impact_inr": "3.21",
+      "resolution_class": "internal_fix",
+      "injector_params": {}
+    },
+    {
+      "batch": 5,
+      "cause": "rto_reversal_later_cycle",
+      "affected_row_ids": [
+        "st_001111",
+        "st_001112",
+        "st_001113",
+        "st_001114"
+      ],
+      "affected_order_ids": [
+        "ord_000087",
+        "ord_000098",
+        "ord_000104",
+        "ord_000118"
+      ],
+      "true_impact_inr": "6268.76",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "flipkart",
+        "sale_batch": 2,
+        "reversal_batch": 5
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "settlement_lag_crossing_batch",
+      "affected_row_ids": [
+        "st_000334",
+        "st_000376",
+        "st_000385",
+        "st_000391",
+        "st_000400",
+        "st_000418"
+      ],
+      "affected_order_ids": [
+        "ord_000317",
+        "ord_000357",
+        "ord_000366",
+        "ord_000372",
+        "ord_000381",
+        "ord_000399"
+      ],
+      "true_impact_inr": "12703.42",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "amazon",
+        "extra_lag_days": 17
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "short_payment_unexplained",
+      "affected_row_ids": [
+        "st_000395",
+        "st_000415"
+      ],
+      "affected_order_ids": [
+        "ord_000376",
+        "ord_000396"
+      ],
+      "true_impact_inr": "478.93",
+      "resolution_class": "counterparty_claim",
+      "injector_params": {
+        "channel": "myntra",
+        "shortfall_pct": "0.10",
+        "recoveries": [
+          {
+            "order_id": "ord_000376",
+            "row_id": "st_001152",
+            "batch": 9,
+            "amount_inr": "360.05"
+          }
+        ]
+      }
+    },
+    {
+      "batch": 5,
+      "cause": "short_payment_unexplained",
+      "affected_row_ids": [
+        "st_000403"
+      ],
+      "affected_order_ids": [
+        "ord_000384"
+      ],
+      "true_impact_inr": "145.61",
+      "resolution_class": "counterparty_claim",
+      "injector_params": {
+        "channel": "myntra",
+        "near_miss": true,
+        "looks_like": "commission_rate_stale",
+        "stale_rate": "0.25",
+        "charged_rate": "0.272"
+      }
+    }
+  ]
+}

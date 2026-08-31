@@ -1,0 +1,273 @@
+{
+  "batches": {
+    "1": {
+      "row_counts": {
+        "settlement_rows": 59,
+        "malformed_rows": 0,
+        "bank_rows": 12,
+        "ledger_rows": 173
+      },
+      "injection_count": 8,
+      "affected_rows": 21,
+      "total_impact_inr": "43845.71",
+      "causes": [
+        "bank_credit_unmatched",
+        "commission_rate_stale",
+        "duplicate_settlement_row",
+        "missing_settlement_row",
+        "refund_timing_lag",
+        "rounding_variance",
+        "settlement_lag_crossing_batch",
+        "weight_dispute_hold"
+      ]
+    },
+    "2": {
+      "row_counts": {
+        "settlement_rows": 74,
+        "malformed_rows": 1,
+        "bank_rows": 14,
+        "ledger_rows": 95
+      },
+      "injection_count": 8,
+      "affected_rows": 25,
+      "total_impact_inr": "22570.79",
+      "causes": [
+        "commission_rate_stale",
+        "fee_mismatch_other",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "short_payment_unexplained",
+        "tcs_timing_mismatch"
+      ]
+    },
+    "3": {
+      "row_counts": {
+        "settlement_rows": 87,
+        "malformed_rows": 0,
+        "bank_rows": 12,
+        "ledger_rows": 96
+      },
+      "injection_count": 9,
+      "affected_rows": 29,
+      "total_impact_inr": "26625.44",
+      "causes": [
+        "commission_rate_stale",
+        "commission_slab_change",
+        "missing_settlement_row",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "tds_timing_mismatch"
+      ]
+    },
+    "4": {
+      "row_counts": {
+        "settlement_rows": 101,
+        "malformed_rows": 1,
+        "bank_rows": 12,
+        "ledger_rows": 111
+      },
+      "injection_count": 9,
+      "affected_rows": 33,
+      "total_impact_inr": "67997.29",
+      "causes": [
+        "bank_credit_unmatched",
+        "commission_rate_stale",
+        "duplicate_settlement_row",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "weight_dispute_hold"
+      ]
+    },
+    "5": {
+      "row_counts": {
+        "settlement_rows": 114,
+        "malformed_rows": 0,
+        "bank_rows": 17,
+        "ledger_rows": 109
+      },
+      "injection_count": 9,
+      "affected_rows": 35,
+      "total_impact_inr": "31645.40",
+      "causes": [
+        "commission_rate_stale",
+        "fee_mismatch_other",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "short_payment_unexplained"
+      ]
+    },
+    "6": {
+      "row_counts": {
+        "settlement_rows": 127,
+        "malformed_rows": 1,
+        "bank_rows": 17,
+        "ledger_rows": 124
+      },
+      "injection_count": 8,
+      "affected_rows": 38,
+      "total_impact_inr": "39618.45",
+      "causes": [
+        "commission_rate_stale",
+        "missing_settlement_row",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "tcs_timing_mismatch"
+      ]
+    },
+    "7": {
+      "row_counts": {
+        "settlement_rows": 141,
+        "malformed_rows": 0,
+        "bank_rows": 14,
+        "ledger_rows": 146
+      },
+      "injection_count": 8,
+      "affected_rows": 41,
+      "total_impact_inr": "35981.61",
+      "causes": [
+        "commission_rate_stale",
+        "fee_mismatch_other",
+        "promo_cofunding_deduction",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch"
+      ]
+    },
+    "8": {
+      "row_counts": {
+        "settlement_rows": 154,
+        "malformed_rows": 1,
+        "bank_rows": 17,
+        "ledger_rows": 111
+      },
+      "injection_count": 9,
+      "affected_rows": 48,
+      "total_impact_inr": "43035.65",
+      "causes": [
+        "commission_rate_stale",
+        "promo_cofunding_deduction",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch",
+        "short_payment_unexplained",
+        "weight_dispute_hold"
+      ]
+    },
+    "9": {
+      "row_counts": {
+        "settlement_rows": 167,
+        "malformed_rows": 1,
+        "bank_rows": 17,
+        "ledger_rows": 60
+      },
+      "injection_count": 9,
+      "affected_rows": 50,
+      "total_impact_inr": "57305.42",
+      "causes": [
+        "chargeback_deduction",
+        "commission_rate_stale",
+        "duplicate_settlement_row",
+        "promo_cofunding_deduction",
+        "refund_timing_lag",
+        "rounding_variance",
+        "rto_reversal_later_cycle",
+        "settlement_lag_crossing_batch"
+      ]
+    },
+    "10": {
+      "row_counts": {
+        "settlement_rows": 181,
+        "malformed_rows": 0,
+        "bank_rows": 18,
+        "ledger_rows": 24
+      },
+      "injection_count": 9,
+      "affected_rows": 51,
+      "total_impact_inr": "95620.37",
+      "causes": [
+        "bank_credit_unmatched",
+        "chargeback_deduction",
+        "commission_rate_stale",
+        "promo_cofunding_deduction",
+        "rounding_variance",
+        "rto_reversal_later_cycle"
+      ]
+    }
+  },
+  "recovery_pairs": [
+    {
+      "cause": "missing_settlement_row",
+      "claim_batch": 1,
+      "order_id": "ord_000025",
+      "row_id": "st_001109",
+      "batch": 4,
+      "amount_inr": "775.36"
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "claim_batch": 2,
+      "order_id": "ord_000081",
+      "row_id": "st_001120",
+      "batch": 4,
+      "amount_inr": "287.97"
+    },
+    {
+      "cause": "missing_settlement_row",
+      "claim_batch": 3,
+      "order_id": "ord_000193",
+      "row_id": "st_001130",
+      "batch": 6,
+      "amount_inr": "1200.29"
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "claim_batch": 5,
+      "order_id": "ord_000376",
+      "row_id": "st_001152",
+      "batch": 9,
+      "amount_inr": "360.05"
+    },
+    {
+      "cause": "missing_settlement_row",
+      "claim_batch": 6,
+      "order_id": "ord_000491",
+      "row_id": "st_001164",
+      "batch": 8,
+      "amount_inr": "3091.06"
+    }
+  ],
+  "malformed_rows": {
+    "1": [],
+    "2": [
+      "missing_order_id"
+    ],
+    "3": [],
+    "4": [
+      "unparseable_date"
+    ],
+    "5": [],
+    "6": [
+      "amount_with_comma"
+    ],
+    "7": [],
+    "8": [
+      "missing_order_id"
+    ],
+    "9": [
+      "unparseable_date"
+    ],
+    "10": []
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "batch": 2,
+  "row_counts": {
+    "settlement_rows": 74,
+    "malformed_rows": 1,
+    "bank_rows": 14,
+    "ledger_rows": 95
+  },
+  "injections": [
+    {
+      "batch": 2,
+      "cause": "commission_rate_stale",
+      "affected_row_ids": [
+        "st_000072",
+        "st_000073",
+        "st_000098",
+        "st_000099",
+        "st_000116",
+        "st_000130"
+      ],
+      "affected_order_ids": [
+        "ord_000068",
+        "ord_000069",
+        "ord_000092",
+        "ord_000093",
+        "ord_000109",
+        "ord_000123"
+      ],
+      "true_impact_inr": "549.43",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "myntra",
+        "stale_rate": "0.25",
+        "actual_rate": "0.272"
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "fee_mismatch_other",
+      "affected_row_ids": [
+        "st_000067",
+        "st_000118"
+      ],
+      "affected_order_ids": [
+        "ord_000064",
+        "ord_000111"
+      ],
+      "true_impact_inr": "155.76",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "website"
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "refund_timing_lag",
+      "affected_row_ids": [
+        "st_001117",
+        "st_001118",
+        "st_001119"
+      ],
+      "affected_order_ids": [
+        "ord_000105",
+        "ord_000125",
+        "ord_000131"
+      ],
+      "true_impact_inr": "5910.71",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "amazon",
+        "booked_batch": 2,
+        "deducted_batch": 4
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "rounding_variance",
+      "affected_row_ids": [
+        "st_000084",
+        "st_000092",
+        "st_000107"
+      ],
+      "affected_order_ids": [
+        "ord_000079",
+        "ord_000086",
+        "ord_000100"
+      ],
+      "true_impact_inr": "1.22",
+      "resolution_class": "internal_fix",
+      "injector_params": {}
+    },
+    {
+      "batch": 2,
+      "cause": "rto_reversal_later_cycle",
+      "affected_row_ids": [
+        "st_001104",
+        "st_001105"
+      ],
+      "affected_order_ids": [
+        "ord_000038",
+        "ord_000039"
+      ],
+      "true_impact_inr": "4540.73",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "flipkart",
+        "sale_batch": 1,
+        "reversal_batch": 2
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "settlement_lag_crossing_batch",
+      "affected_row_ids": [
+        "st_000076",
+        "st_000080",
+        "st_000097",
+        "st_000122",
+        "st_000139"
+      ],
+      "affected_order_ids": [
+        "ord_000071",
+        "ord_000075",
+        "ord_000091",
+        "ord_000115",
+        "ord_000132"
+      ],
+      "true_impact_inr": "10675.95",
+      "resolution_class": "internal_fix",
+      "injector_params": {
+        "channel": "amazon",
+        "extra_lag_days": 17
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "short_payment_unexplained",
+      "affected_row_ids": [
+        "st_000086",
+        "st_000121"
+      ],
+      "affected_order_ids": [
+        "ord_000081",
+        "ord_000114"
+      ],
+      "true_impact_inr": "717.48",
+      "resolution_class": "counterparty_claim",
+      "injector_params": {
+        "channel": "flipkart",
+        "shortfall_pct": "0.12",
+        "recoveries": [
+          {
+            "order_id": "ord_000081",
+            "row_id": "st_001120",
+            "batch": 4,
+            "amount_inr": "287.97"
+          }
+        ]
+      }
+    },
+    {
+      "batch": 2,
+      "cause": "tcs_timing_mismatch",
+      "affected_row_ids": [
+        "st_000123",
+        "st_001121"
+      ],
+      "affected_order_ids": [
+        "ord_000116"
+      ],
+      "true_impact_inr": "19.51",
+      "resolution_class": "tax_review",
+      "injector_params": {
+        "channel": "myntra",
+        "collected_batch": 3
+      }
+    }
+  ]
+}

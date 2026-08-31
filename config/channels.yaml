@@ -1,0 +1,121 @@
+# Per-channel realism for the synthetic world.
+# Rates are fractions, not percentages. Money ranges are INR.
+
+taxes:
+  gst_on_commission_rate: 0.18      # GST charged on the platform's fee
+  tcs_rate: 0.01                    # 1% collected at source, marketplaces only
+  tds_rate: 0.001                   # 0.1% under section 194-O, marketplaces only
+
+# Volume mix across the ten batches. Must sum to 1.0.
+channel_mix:
+  amazon: 0.30
+  flipkart: 0.25
+  myntra: 0.20
+  website: 0.15
+  offline: 0.10
+
+channels:
+  amazon:
+    payout_cadence: weekly
+    payout_weekday: 1              # Tuesday payout run
+    marketplace: true               # TCS + TDS apply
+    settlement_lag_days: [7, 14]
+    rto_rate: 0.25
+    safe_t_eligible: true
+    refund_sign_convention: negative_amount
+    order_value_inr: [599, 4999]
+    # commission varies by apparel category: 18-24%
+    categories:
+      apparel_topwear: 0.18
+      apparel_bottomwear: 0.20
+      apparel_ethnic: 0.22
+      apparel_footwear: 0.24
+    settlement_id_prefix: AMZ-STL
+    utr_prefix: AXISN
+    descriptions:
+      payment: ["Order Payment {order_id} FBA", "Order Payment {order_id} EASYSHIP", "Principal {order_id}"]
+      refund: ["Refund {order_id} CUSTOMER RETURN", "Return-Principal {order_id}"]
+      adjustment: ["Adjustment {order_id} SAFE-T", "Misc Adjustment {order_id}"]
+      transfer: ["Transfer to bank {settlement_id}"]
+
+  flipkart:
+    payout_cadence: weekly
+    payout_weekday: 3              # Thursday payout run
+    marketplace: true
+    settlement_lag_days: [7, 15]
+    rto_rate: 0.28
+    safe_t_eligible: false
+    refund_sign_convention: positive_debit
+    order_value_inr: [499, 4499]
+    categories:
+      apparel_topwear: 0.15
+      apparel_bottomwear: 0.17
+      apparel_ethnic: 0.19
+      apparel_footwear: 0.22
+    settlement_id_prefix: FK-SETL
+    utr_prefix: HDFCN
+    descriptions:
+      payment: ["Sale Settlement OD{ref}", "SETTLEMENT-OD{ref}-FA"]
+      refund: ["Return Recovery OD{ref}", "CUSTOMER RETURN OD{ref}"]
+      adjustment: ["Weight Discrepancy OD{ref}", "Adj OD{ref} SPF"]
+      transfer: ["NEFT {settlement_id}"]
+
+  myntra:
+    payout_cadence: weekly
+    payout_weekday: 0              # Monday payout run
+    marketplace: true
+    settlement_lag_days: [10, 21]
+    rto_rate: 0.30
+    safe_t_eligible: false
+    refund_sign_convention: negative_amount
+    order_value_inr: [699, 5999]
+    categories:
+      apparel_topwear: 0.20
+      apparel_bottomwear: 0.22
+      apparel_ethnic: 0.25
+      apparel_footwear: 0.28
+    settlement_id_prefix: MYN-PO
+    utr_prefix: ICICN
+    descriptions:
+      payment: ["PPMP SALE {order_id}", "SJIT SALE {order_id}"]
+      refund: ["PPMP RETURN {order_id}", "CUSTOMER CANCEL {order_id}"]
+      adjustment: ["MP ADJ {order_id}", "COMMISSION ADJ {order_id}"]
+      transfer: ["PAYOUT {settlement_id}"]
+
+  website:
+    payout_cadence: daily
+    payout_weekday: null
+    marketplace: false              # gateway, not a marketplace: no TCS/TDS
+    settlement_lag_days: [2, 2]     # T+2
+    rto_rate: 0.08
+    safe_t_eligible: false
+    refund_sign_convention: negative_amount
+    order_value_inr: [899, 6999]
+    categories:
+      direct: 0.02                  # 2% gateway fee, flat
+    settlement_id_prefix: RZP-STL
+    utr_prefix: RATNN
+    descriptions:
+      payment: ["rzp settlement pay_{ref}", "PG CAPTURE pay_{ref}"]
+      refund: ["rfnd_{ref} refund", "PG REFUND pay_{ref}"]
+      adjustment: ["adj_{ref} gateway", "PG ADJ pay_{ref}"]
+      transfer: ["rzp payout {settlement_id}"]
+
+  offline:
+    payout_cadence: daily
+    payout_weekday: null
+    marketplace: false
+    settlement_lag_days: [1, 1]     # T+1
+    rto_rate: 0.0
+    safe_t_eligible: false
+    refund_sign_convention: positive_debit
+    order_value_inr: [799, 5499]
+    categories:
+      pos: 0.02
+    settlement_id_prefix: POS-BATCH
+    utr_prefix: SBIN
+    descriptions:
+      payment: ["POS TID{ref} SALE", "CARD SALE TID{ref}"]
+      refund: ["POS TID{ref} VOID", "CARD REFUND TID{ref}"]
+      adjustment: ["POS ADJ TID{ref}", "MDR ADJ TID{ref}"]
+      transfer: ["POS SETTLEMENT {settlement_id}"]

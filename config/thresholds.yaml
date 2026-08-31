@@ -1,0 +1,28 @@
+# Tallytrace thresholds.
+# Nothing in the codebase may hardcode any number that appears in this file.
+# See spec/00-project-brief.md -> "Thresholds".
+
+matching:
+  rounding_tolerance_inr: 1.00
+  date_window_days: 21
+  fee_variance_tolerance_pct: 0.5
+
+auto_resolution:
+  max_variance_inr: 500.00          # above this, never auto-resolve
+  never_auto_resolve_causes:        # regardless of rule confidence
+    - tcs_timing_mismatch
+    - tds_timing_mismatch
+    - chargeback_deduction
+
+rule_lifecycle:
+  promotion_min_confirmations: 3
+  promotion_min_precision: 0.90
+  retirement_precision_floor: 0.75
+  retirement_min_observations: 5
+
+claims:
+  deadline_days:
+    amazon: 30                       # SAFE-T window
+    flipkart: 30
+    myntra: 30
+    tcs_discrepancy: 10              # day-of-month cutoff, not a duration

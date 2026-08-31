@@ -1,0 +1,154 @@
+# The generation plan. Everything the synthetic world depends on lives here so that
+# "how many troubles of which cause, worth how many rupees" is answerable by reading
+# config rather than by reading code.
+
+seed: 20250106
+batch_count: 10
+batch_length_days: 7
+first_batch_start: 2025-01-06          # Monday
+
+# Orders *settling* in each batch. Generation is driven from the settlement cycle
+# rather than the order date: a batch is a settlement report, so this is what
+# actually sets each batch's size. created_at is then derived backwards from the
+# channel's lag, which produces the opening book (orders created before batch 1)
+# for free and leaves nothing unsettled at the end of the corpus.
+#
+# These are calibrated, not guessed. Injectors move rows between batches -- a lagged
+# settlement leaves its batch, an RTO reversal or a claim recovery arrives in a later
+# one -- and refunded orders emit a second row. Batch 10 absorbs all the spillover and
+# emits none, which is why its order count dips below batch 9's while its row count
+# is still the largest. The resulting settlement-report row counts are:
+#   59, 72, 85, 101, 114, 127, 141, 154, 167, 181
+settlements_per_batch: [61, 73, 83, 89, 103, 117, 123, 134, 144, 122]
+
+# Share of orders that are refunded/returned in the clean base (independent of the
+# RTO reversal injector). Keeps the refund path exercised in clean data.
+clean_refund_rate: 0.06
+
+# Malformed rows written raw into the CSVs, bypassing the models, to exercise the
+# quarantine path. batch -> list of corruption kinds.
+malformed_rows:
+  2: [missing_order_id]
+  4: [unparseable_date]
+  6: [amount_with_comma]
+  8: [missing_order_id]
+  9: [unparseable_date]
+
+# ---------------------------------------------------------------------------
+# The injection plan.
+#
+# recurring  : commission_rate_stale / rto_reversal_later_cycle /
+#              refund_timing_lag / settlement_lag_crossing_batch appear in most
+#              batches with a consistent signature. These are what the system learns.
+# held out   : promo_cofunding_deduction first appears in batch 7,
+#              chargeback_deduction first appears in batch 9. Nowhere earlier.
+# one-offs   : 1-2 per batch with no consistent signature. These are why the review
+#              rate plateaus above zero.
+# near-miss  : surface signature of the myntra stale-rate rule, different true cause.
+# ---------------------------------------------------------------------------
+injections:
+  1:
+    - {injector: commission_rate_stale,        count: 5, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: settlement_lag_crossing_batch, count: 4, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 3, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: rto_reversal_later_cycle,     count: 2, params: {channel: flipkart, reversal_batch_offset: 1}}
+    - {injector: refund_timing_lag,            count: 3, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: missing_settlement_row,       count: 2, params: {channel: amazon,   recoveries: 1, recovery_batch_offset: 3}}
+    - {injector: weight_dispute_hold,          count: 2, params: {channel: flipkart}}
+    - {injector: rounding_variance,            count: 3, params: {}}
+    - {injector: duplicate_settlement_row,     count: 1, params: {channel: flipkart}}
+    - {injector: bank_credit_unmatched,        count: 1, params: {}}
+  2:
+    - {injector: commission_rate_stale,        count: 6, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: settlement_lag_crossing_batch, count: 5, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 4, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: rto_reversal_later_cycle,     count: 2, params: {channel: flipkart, reversal_batch_offset: 1}}
+    - {injector: refund_timing_lag,            count: 3, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: short_payment_unexplained,    count: 2, params: {channel: flipkart, shortfall_pct: 0.12, recoveries: 1, recovery_batch_offset: 2}}
+    - {injector: fee_mismatch_other,           count: 2, params: {channel: website}}
+    - {injector: rounding_variance,            count: 3, params: {}}
+    - {injector: tcs_timing_mismatch,          count: 1, params: {channel: myntra, defer_batches: 1}}
+  3:
+    - {injector: commission_rate_stale,        count: 6, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 3, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 5, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 4, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: refund_timing_lag,            count: 4, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: missing_settlement_row,       count: 2, params: {channel: myntra,   recoveries: 1, recovery_batch_offset: 3}}
+    - {injector: commission_slab_change,       count: 2, params: {channel: flipkart, actual_rate: 0.24}}
+    - {injector: rounding_variance,            count: 3, params: {}}
+    - {injector: tds_timing_mismatch,          count: 1, params: {channel: amazon, defer_batches: 1}}
+  4:
+    - {injector: commission_rate_stale,        count: 7, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 4, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 6, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 5, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: refund_timing_lag,            count: 4, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: weight_dispute_hold,          count: 3, params: {channel: flipkart}}
+    - {injector: rounding_variance,            count: 4, params: {}}
+    - {injector: duplicate_settlement_row,     count: 1, params: {channel: myntra}}
+    - {injector: bank_credit_unmatched,        count: 1, params: {}}
+  5:
+    - {injector: commission_rate_stale,        count: 8, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 4, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 6, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 5, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: refund_timing_lag,            count: 5, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: short_payment_unexplained,    count: 2, params: {channel: myntra,   shortfall_pct: 0.10, recoveries: 1, recovery_batch_offset: 4}}
+    - {injector: near_miss_fee_variance,       count: 1, params: {channel: myntra,   actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: fee_mismatch_other,           count: 1, params: {channel: flipkart}}
+    - {injector: rounding_variance,            count: 4, params: {}}
+  6:
+    - {injector: commission_rate_stale,        count: 9, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 5, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 7, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 6, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: refund_timing_lag,            count: 5, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: missing_settlement_row,       count: 2, params: {channel: amazon,   recoveries: 1, recovery_batch_offset: 2}}
+    - {injector: rounding_variance,            count: 4, params: {}}
+    - {injector: tcs_timing_mismatch,          count: 1, params: {channel: flipkart, defer_batches: 1}}
+  7:
+    - {injector: commission_rate_stale,        count: 10, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 5, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 7, params: {channel: amazon,  extra_lag_days: 17}}
+    - {injector: rto_reversal_later_cycle,     count: 6, params: {channel: flipkart, reversal_batch_offset: 3}}
+    - {injector: refund_timing_lag,            count: 6, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: promo_cofunding_deduction,    count: 3, params: {channel: myntra,   deduction_pct: 0.08}}   # FIRST APPEARANCE
+    - {injector: rounding_variance,            count: 4, params: {}}
+    - {injector: fee_mismatch_other,           count: 1, params: {channel: offline}}
+  8:
+    - {injector: commission_rate_stale,        count: 11, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 6, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    # extra_lag_days trimmed from 17: the corpus ends at batch 10 and the payout must land inside it.
+    - {injector: settlement_lag_crossing_batch, count: 8, params: {channel: amazon,  extra_lag_days: 14}}
+    - {injector: rto_reversal_later_cycle,     count: 7, params: {channel: flipkart, reversal_batch_offset: 2}}
+    - {injector: refund_timing_lag,            count: 6, params: {channel: amazon,   refund_batch_offset: 2}}
+    - {injector: promo_cofunding_deduction,    count: 3, params: {channel: myntra,   deduction_pct: 0.08}}
+    - {injector: near_miss_fee_variance,       count: 1, params: {channel: myntra,   actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: weight_dispute_hold,          count: 3, params: {channel: flipkart}}
+    - {injector: rounding_variance,            count: 5, params: {}}
+  9:
+    - {injector: commission_rate_stale,        count: 12, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 6, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: settlement_lag_crossing_batch, count: 8, params: {channel: amazon,  extra_lag_days: 7}}
+    - {injector: rto_reversal_later_cycle,     count: 7, params: {channel: flipkart, reversal_batch_offset: 1}}
+    - {injector: refund_timing_lag,            count: 7, params: {channel: amazon,   refund_batch_offset: 1}}
+    - {injector: chargeback_deduction,         count: 3, params: {channel: website}}                          # FIRST APPEARANCE
+    - {injector: promo_cofunding_deduction,    count: 2, params: {channel: amazon,   deduction_pct: 0.06}}
+    - {injector: rounding_variance,            count: 5, params: {}}
+    - {injector: duplicate_settlement_row,     count: 1, params: {channel: amazon}}
+  10:
+    # Batch 10 is the end of the corpus: a sale here has no later cycle to slip,
+    # reverse or lag into. The cross-batch rows landing in batch 10 come from the
+    # batch 8 and batch 9 entries above.
+    - {injector: commission_rate_stale,        count: 13, params: {channel: myntra,  actual_rate: 0.272, ledger_rate: 0.25}}
+    - {injector: commission_rate_stale,        count: 7, params: {channel: amazon,  actual_rate: 0.215, ledger_rate: 0.20}}
+    - {injector: chargeback_deduction,         count: 3, params: {channel: website}}
+    - {injector: promo_cofunding_deduction,    count: 2, params: {channel: amazon,   deduction_pct: 0.06}}
+    - {injector: rounding_variance,            count: 5, params: {}}
+    - {injector: bank_credit_unmatched,        count: 1, params: {}}
+
+# Causes that must not appear before the named batch. Asserted by a test, not by eye.
+held_out:
+  promo_cofunding_deduction: 7
+  chargeback_deduction: 9
