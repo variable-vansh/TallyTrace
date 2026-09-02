@@ -20,6 +20,7 @@ JSON numbers *for the UI only*. ``data/score.json`` -- the artifact anyone would
 
 from __future__ import annotations
 
+import argparse
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -34,6 +35,7 @@ from pipeline.learn import BatchLearning
 from pipeline.matcher import BatchResult, Bucket, GroupFinding
 from pipeline.rules.apply import AUTO_RESOLVED, Decision
 from pipeline.rules.models import Rule
+from pipeline.metrics.registry import REGISTRY, MetricParams, MetricResult, catalogue, compute
 from pipeline.rules.resolutions import OperatorLog
 from pipeline.rules import resolutions as operator_log
 
@@ -259,6 +261,114 @@ def week(score: Score, index: int, log: OperatorLog, lookup: dict) -> dict[str, 
         "exceptions": exceptions(batch, log, lookup),
         "proposals": [proposal.to_json() for proposal in batch.proposals],
         "resolutions": [r.to_json() for r in batch.resolutions],
+        "claims": batch.claims.to_json(),
+    }
+
+
+def claims(score: Score) -> list[dict[str, Any]]:
+    """Every claim, open and closed, with its clock resolved against the corpus end."""
+    as_of = score.queue.as_of
+    return [
+        {
+            **claim.to_json(),
+            "amount": money(claim.amount_inr),
+            "daysRemaining": claim.days_remaining(as_of),
+            "recoveredAmount": money(claim.recovered_amount_inr),
+        }
+        for claim in score.claims.claims
+    ]
+
+
+def metric_result(result: MetricResult) -> dict[str, Any]:
+    """One computed metric, with values as numbers because a chart has to do arithmetic."""
+    payload = result.to_json()
+    payload["points"] = [
+        {"label": point.label, "value": money(point.value)} for point in result.points
+    ]
+    return payload
+
+
+def registry_results(score: Score) -> dict[str, Any]:
+    """Every registered metric, at every grouping it supports, precomputed.
+
+    The browser cannot run the registry -- the registry is Python and the metrics are
+    Decimal arithmetic over the reconciled corpus -- so the ask surface renders a lookup
+    of results this run already computed. That is not a shortcut around the design, it is
+    the design: a metric is a pure function of the corpus, so its value for a given
+    grouping is settled the moment the batch is scored, and the browser is showing what
+    the last run produced rather than deriving anything of its own.
+
+    Keyed ``metric_id|group_by`` so a pin, a question and a registry pick all resolve the
+    same way.
+    """
+    return {
+        f"{metric.metric_id}|{grouping}": metric_result(
+            compute(metric.metric_id, score.reporting.corpus, MetricParams(group_by=grouping))
+        )
+        for metric in REGISTRY.values()
+        for grouping in metric.groupings
+    }
+
+
+def reporting(score: Score) -> dict[str, Any]:
+    surface = score.reporting
+    return {
+        "registry": catalogue(),
+        "results": registry_results(score),
+        "questions": [
+            {
+                **answer.plan.to_json(),
+                "askedBy": answer.asked.asked_by,
+                "askedAt": answer.asked.asked_at,
+                "confirmed": answer.asked.confirmed,
+                "pinnedAs": answer.asked.pin_as,
+                "result": None if answer.result is None else metric_result(answer.result),
+            }
+            for answer in surface.answers
+        ],
+        "pins": [
+            {**pin.to_json(), "result": metric_result(result)}
+            for pin, result in surface.pins
+        ],
+        "takeRateByBatch": metric_result(
+            compute("effective_take_rate", surface.corpus, MetricParams(group_by="batch"))
+        ),
+        "takeRateByChannel": metric_result(
+            compute("effective_take_rate", surface.corpus, MetricParams(group_by="channel"))
+        ),
+        "commissionShareByChannel": metric_result(
+            compute(
+                "commission_share_of_gross", surface.corpus, MetricParams(group_by="channel")
+            )
+        ),
+    }
+
+
+def totals(score: Score) -> dict[str, Any]:
+    """The headline figures the dashboard and the claims screen read.
+
+    A deliberately small mirror of ``data/score.json``'s ``totals`` block, with the money
+    as JSON numbers rather than strings. ``tests/test_ui_data.py`` asserts the two agree,
+    so the browser and the terminal cannot quote different headline numbers.
+    """
+    claims = score.claims
+    return {
+        "records_processed": sum(m.records_processed for m in score.metrics),
+        "settlement_rows": sum(m.settlement_rows for m in score.metrics),
+        "open_exceptions": score.open_exception_count,
+        "claims_opened": claims.opened,
+        "claims_recovered": len(claims.recovered),
+        "claims_expired": len(claims.expired),
+        "claims_open": len(claims.still_open),
+        "rupees_recovered": money(claims.rupees_recovered),
+        "rupees_expired": money(claims.rupees_expired),
+        "rupees_open": money(score.queue.total_inr),
+        "claim_recovery_rate_pct": money(claims.recovery_rate),
+        "registered_metrics": len(REGISTRY),
+        "questions_asked": len(score.reporting.answers),
+        "questions_mapped": score.reporting.mapped,
+        "questions_declined": score.reporting.declined,
+        "pinned_metrics": len(score.reporting.pins),
     }
 
 
@@ -269,6 +379,7 @@ def build(score: Score) -> dict[str, Any]:
 
     return {
         "generatedFrom": "make score",
+        "totals": totals(score),
         "model": score.pricing.model,
         "tokensEstimated": score.run.tokens_estimated,
         "weeks": [week(score, index, log, lookup) for index in range(len(score.results))],
@@ -283,6 +394,16 @@ def build(score: Score) -> dict[str, Any]:
             for b in score.learning.batches
         ],
         "rules": [rule_json(rule, log, true_precision) for rule in score.run.store.rules],
+        "claims": claims(score),
+        "claimsQueue": {
+            **score.queue.to_json(),
+            "rows": [row.claim.claim_id for row in score.queue.rows],
+            "totalInr": money(score.queue.total_inr),
+        },
+        "claimsByBatch": [batch.to_json() for batch in score.claims.batches],
+        "plantedRecoveries": [entry.to_json() for entry in score.claims.planted],
+        "claimAttribution": [entry.to_json() for entry in score.claims.attribution],
+        "reporting": reporting(score),
         "abstention": [entry.to_json() for entry in score.learning.abstentions],
         "overallPrecision": (
             None if score.learning.overall_precision is None
@@ -304,11 +425,18 @@ def build(score: Score) -> dict[str, Any]:
 
 
 def main() -> int:
-    payload = build(run())
+    parser = argparse.ArgumentParser(description="Build the JSON the React UI reads.")
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="never call the API, even with a key set; answer only from data/llm_cache",
+    )
+    args = parser.parse_args()
+    payload = build(run(allow_network=not args.offline))
     UI_JSON.parent.mkdir(parents=True, exist_ok=True)
     UI_JSON.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     size = UI_JSON.stat().st_size / 1024
-    print(f"{len(payload['weeks'])} weeks, {len(payload['rules'])} rules -> "
+    print(f"{len(payload['weeks'])} weeks, {len(payload['rules'])} rules, "
+          f"{len(payload['claims'])} claims, {len(payload['reporting']['pins'])} pins -> "
           f"{UI_JSON.relative_to(REPO_ROOT)} ({size:.0f} KB)")
     return 0
 

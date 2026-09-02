@@ -13,13 +13,17 @@ The order inside a batch is the product, so it is worth stating plainly:
    human untouched.
 5. **Card decisions.** What the operator did with last week's proposals is applied,
    judging the observations those rules made.
-6. **Resolve.** The operator's free text for this batch is read, shadow predictions on
+6. **Claims.** Everything the routing sends to a counterparty is handed to the claims
+   register: this batch's credits close earlier claims, elapsed windows expire, new
+   claims open and get a draft. The learning loop and the claims queue are two
+   destinations off one routing decision, not two pipelines.
+7. **Resolve.** The operator's free text for this batch is read, shadow predictions on
    those cases are judged against what the human actually said, and new rules are
    induced from any resolution that does not corroborate a rule already held.
-7. **Advance.** Every rule's lifecycle state is recomputed from its record.
+8. **Advance.** Every rule's lifecycle state is recomputed from its record.
 
-Step 4 before step 6 matters: a rule must predict *before* it is told the answer, or
-its precision is a measure of nothing. Step 7 last, so a rule promoted this week
+Step 4 before step 7 matters: a rule must predict *before* it is told the answer, or
+its precision is a measure of nothing. Step 8 last, so a rule promoted this week
 starts firing next week rather than retroactively.
 
 Reads ``data/generated``, ``data/resolutions.json`` and the LLM cache. Never the
@@ -28,18 +32,34 @@ answer key -- ``tests/test_boundaries.py`` fails if this file so much as names i
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pipeline.cases import ExceptionCase, FindingLog, build_cases
-from pipeline.config import CONFIG_DIR, REPO_ROOT, generation, load_yaml, thresholds
+from pipeline.claims.deadlines import deadline_config_from
+from pipeline.claims.drafting import drafter_for
+from pipeline.claims.models import Claim
+from pipeline.claims.queue import QueueView, build as build_queue
+from pipeline.claims.register import BatchClaims, ClaimRegister
+from pipeline.claims.routing import route
+from pipeline.config import (
+    CONFIG_DIR,
+    REPO_ROOT,
+    batch_window,
+    generation,
+    load_yaml,
+    resolution_class_by_cause,
+    thresholds,
+)
 from pipeline.llm.client import LlmClient, client_from
+from pipeline.llm.drafts import narrate
 from pipeline.llm.hypotheses import hypothesise
 from pipeline.llm.induction import induce
-from pipeline.llm.schemas import Hypothesis
+from pipeline.llm.schemas import ClaimNarrative, Hypothesis
 from pipeline.llm.usage import UsageLedger
 from pipeline.loader import BatchTables, load_batch
 from pipeline.matcher import BatchResult, Bucket, MatchConfig, match_config_from
@@ -58,6 +78,29 @@ LEARNING_JSON = REPO_ROOT / "data" / "learning.json"
 ZERO = Decimal("0.00")
 
 
+#: Turns (platform, cause, batch) into the words of a claim. The live implementation
+#: asks the model through the cache; ``tools/write_llm_fixtures.py`` passes one that
+#: records which shapes a real run asks for, which is how the fixture list stays
+#: derived from the corpus rather than typed out by hand and quietly going stale.
+Narrator = Callable[[str, str, int], ClaimNarrative]
+
+
+def live_narrator(client: LlmClient) -> Narrator:
+    def ask(platform: str, cause: str, batch: int) -> ClaimNarrative:
+        return narrate(client, platform, cause, batch)
+
+    return ask
+
+
+def new_register() -> ClaimRegister:
+    """A register wired from config. Both the runner and the harness build one this way."""
+    cfg = thresholds()
+    return ClaimRegister(
+        deadlines=deadline_config_from(cfg),
+        rounding_tolerance_inr=Decimal(cfg["matching"]["rounding_tolerance_inr"]),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Per-batch record
 # --------------------------------------------------------------------------- #
@@ -69,6 +112,10 @@ class BatchLearning:
 
     batch: int
     result: BatchResult
+    #: The rows this batch was reconciled from. Carried rather than reloaded, so the
+    #: metric registry computes over exactly the rows the matcher bucketed. A second
+    #: read of the CSVs would let the two halves disagree about which rows existed.
+    tables: BatchTables
     cases: tuple[ExceptionCase, ...]
     hypotheses: dict[str, Hypothesis]
     decisions: tuple[Decision, ...]
@@ -77,6 +124,7 @@ class BatchLearning:
     rules_promoted: tuple[str, ...]
     rules_retired: tuple[str, ...]
     resolutions: tuple[Resolution, ...]
+    claims: BatchClaims
 
     @property
     def auto_resolved(self) -> tuple[Decision, ...]:
@@ -107,6 +155,7 @@ class BatchLearning:
             "rules_promoted": list(self.rules_promoted),
             "rules_retired": list(self.rules_retired),
             "resolutions_captured": len(self.resolutions),
+            "claims": self.claims.to_json(),
             "proposals": [proposal.to_json() for proposal in self.proposals],
             "decisions": [
                 {
@@ -138,6 +187,7 @@ class LearningRun:
 
     batches: list[BatchLearning] = field(default_factory=list)
     store: RuleStore = field(default_factory=RuleStore)
+    register: ClaimRegister = field(default_factory=lambda: new_register())
     ledger: UsageLedger = field(default_factory=UsageLedger)
     #: Whether the token counts behind the cost report were metered by the API or
     #: estimated from a recorded transcript. Carried so the report can label them.
@@ -146,6 +196,10 @@ class LearningRun:
     @property
     def results(self) -> list[BatchResult]:
         return [b.result for b in self.batches]
+
+    @property
+    def claims(self) -> list[Claim]:
+        return self.register.claims
 
 
 # --------------------------------------------------------------------------- #
@@ -278,6 +332,39 @@ def _agrees(store: RuleStore, case_id: str, cause: str) -> bool:
     return False
 
 
+def _advance_claims(
+    register: ClaimRegister,
+    tables: BatchTables,
+    cases: list[ExceptionCase],
+    decisions: list[Decision],
+    hypotheses: dict[str, Hypothesis],
+    resolutions: list[Resolution],
+    narrator: Narrator,
+) -> BatchClaims:
+    """Hand this batch's counterparty exceptions to the register, and draft the new ones.
+
+    The routing table is ``config/causes.yaml`` and nothing else: a cause's
+    ``resolution_class`` decides whether it is a rule's problem or a platform's. The
+    same decision list feeds both, so nothing can be in the learning loop and in the
+    claims queue at once, and nothing can fall between them.
+    """
+    routes = resolution_class_by_cause()
+    cases_by_id = {case.case_id: case for case in cases}
+
+    def words(platform: str, cause: str) -> ClaimNarrative:
+        return narrator(platform, cause, tables.batch)
+
+    return register.advance(
+        batch=tables.batch,
+        batch_end=batch_window(tables.batch)[1],
+        settlements=tables.settlements,
+        routed=route(decisions, hypotheses, routes),
+        resolution_class_by_cause=routes,
+        resolutions=resolutions,
+        drafter=drafter_for(words, cases_by_id),
+    )
+
+
 def _decide_all(
     cases: list[ExceptionCase], store: RuleStore, batch: int
 ) -> list[Decision]:
@@ -335,8 +422,10 @@ def run_learning_batch(
     client: LlmClient,
     log: OperatorLog,
     finding_log: FindingLog,
+    register: ClaimRegister,
+    narrator: Narrator | None = None,
 ) -> BatchLearning:
-    """One batch, all seven steps, in order. See the module docstring for why that order."""
+    """One batch, all eight steps, in order. See the module docstring for why that order."""
     result = run_batch(tables, book, cfg)
     batch = result.batch
     cases = build_cases(result, finding_log)
@@ -347,6 +436,10 @@ def run_learning_batch(
 
     _apply_card_decisions(store, log, batch)
     batch_resolutions = log.for_batch(batch)
+    claims = _advance_claims(
+        register, tables, cases, list(decisions), hypotheses, batch_resolutions,
+        narrator or live_narrator(client),
+    )
     learned = _capture_resolutions(
         client, store, {case.case_id: case for case in cases}, batch_resolutions
     )
@@ -355,6 +448,7 @@ def run_learning_batch(
     return BatchLearning(
         batch=batch,
         result=result,
+        tables=tables,
         cases=tuple(cases),
         hypotheses=hypotheses,
         decisions=tuple(decisions),
@@ -363,6 +457,7 @@ def run_learning_batch(
         rules_promoted=tuple(promoted),
         rules_retired=tuple(retired),
         resolutions=tuple(batch_resolutions),
+        claims=claims,
     )
 
 
@@ -372,6 +467,8 @@ def run(
     operator_log: OperatorLog | None = None,
     cache_dir: Path | None = None,
     last_batch: int | None = None,
+    narrator: Narrator | None = None,
+    allow_network: bool = True,
 ) -> LearningRun:
     """Walk the corpus, learning as it goes."""
     pricing = load_yaml(CONFIG_DIR / "pricing.yaml")
@@ -381,6 +478,7 @@ def run(
         cache_dir=cache_dir,
         ledger=ledger,
         chars_per_token=Decimal(str(pricing["estimated_chars_per_token"])),
+        allow_network=allow_network,
     )
     log = operator_log if operator_log is not None else resolution_log.load()
 
@@ -388,13 +486,15 @@ def run(
     book = OpenBook.empty()
     finding_log = FindingLog()
     store = RuleStore()
-    run_record = LearningRun(store=store, ledger=ledger)
+    register = new_register()
+    run_record = LearningRun(store=store, register=register, ledger=ledger)
 
     count = last_batch or int(generation()["batch_count"])
     for batch in range(1, count + 1):
         run_record.batches.append(
             run_learning_batch(
-                load_batch(batch, generated_dir), book, cfg, store, client, log, finding_log
+                load_batch(batch, generated_dir), book, cfg, store, client, log,
+                finding_log, register, narrator,
             )
         )
     run_record.tokens_estimated = client.tokens_estimated
@@ -410,8 +510,15 @@ def to_json(run_record: LearningRun) -> dict[str, Any]:
     return {
         "batches": [batch.to_json() for batch in run_record.batches],
         "rules": run_record.store.to_json()["rules"],
+        "claims": run_record.register.to_json()["claims"],
         "llm": run_record.ledger.total().to_json(),
     }
+
+
+def queue_view(run_record: LearningRun) -> QueueView:
+    """The claims queue as it stands at the end of the run, sorted by expiry."""
+    last = run_record.batches[-1].batch if run_record.batches else 1
+    return build_queue(run_record.register.claims, batch_window(last)[1])
 
 
 def summarise(batch: BatchLearning) -> str:
@@ -423,15 +530,25 @@ def summarise(batch: BatchLearning) -> str:
         f"escalated {len(batch.escalated):>3} (₹{batch.rupees_escalated:>10})  "
         f"cards {len(batch.proposals):>2}  "
         f"learned {len(batch.rules_learned)} promoted {len(batch.rules_promoted)} "
-        f"retired {len(batch.rules_retired)}"
+        f"retired {len(batch.rules_retired)}  "
+        f"claims +{len(batch.claims.opened)} "
+        f"recovered {len(batch.claims.recovered)} expired {len(batch.claims.expired)}"
     )
 
 
 def main() -> int:
-    record = run()
+    parser = argparse.ArgumentParser(description="Run the learning loop across the corpus.")
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="never call the API, even with a key set; answer only from data/llm_cache",
+    )
+    args = parser.parse_args()
+    record = run(allow_network=not args.offline)
     for batch in record.batches:
         print(summarise(batch))
 
+    view = queue_view(record)
+    print(f"\nclaims queue at the end of the corpus: {view.header}")
     rule_store.save(record.store)
     LEARNING_JSON.write_text(
         json.dumps(to_json(record), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

@@ -1,8 +1,8 @@
 """What the LLM costs, in rupees, per reconciled transaction.
 
-Zero today: no model is called anywhere in this build. The arithmetic exists now so
-that checkpoint 3 adds a model and reads a number, rather than adding a model and a
-number at the same time and having no way to tell which one moved the result.
+Built before the first model call existed, so that adding a model and reading a cost
+were two changes rather than one -- with two moving parts there is no way to tell which
+one moved the result. It now reports a real number: ₹0.13 per settlement row.
 
 Rates come from ``config/pricing.yaml`` and are Decimal from the moment they are
 read, like every other money path in the repo.

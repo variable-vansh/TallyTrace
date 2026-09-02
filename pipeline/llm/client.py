@@ -57,7 +57,7 @@ class SchemaViolation(ValueError):
 class Ask:
     """One question: the prompts, the output type, and what to call the tool."""
 
-    task: str                    # hypothesis | induction | intent
+    task: str                    # hypothesis | induction | claim_draft | intent
     system: str
     user: str
     output: type[BaseModel]
@@ -190,10 +190,19 @@ def client_from(
     cache_dir: Path | None = None,
     ledger: UsageLedger | None = None,
     chars_per_token: Decimal = Decimal("3.6"),
+    allow_network: bool = True,
 ) -> LlmClient:
+    """Build the client the pipeline uses.
+
+    ``allow_network=False`` is what ``--offline`` sets. It is stronger than simply
+    having no API key: with a key present in the environment, an offline run still
+    refuses to call out, so "this ran from the committed fixtures" is a property of
+    the invocation rather than of whoever's shell it happened to run in.
+    """
     return LlmClient(
         model=pricing_model,
         cache=ResponseCache(cache_dir),
         ledger=ledger,
         chars_per_token=chars_per_token,
+        allow_network=allow_network,
     )

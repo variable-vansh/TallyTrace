@@ -24,7 +24,13 @@ from pipeline.llm.cache import (
 )
 from pipeline.llm.client import Ask, LlmClient, SchemaViolation
 from pipeline.llm.hypotheses import Question, ask_for, question_for
-from pipeline.llm.schemas import Hypothesis, InducedRule, json_schema
+from pipeline.llm.schemas import (
+    ClaimNarrative,
+    Hypothesis,
+    InducedRule,
+    MetricIntent,
+    json_schema,
+)
 from pipeline.llm.usage import UsageLedger
 from pipeline.models import Cause
 
@@ -225,8 +231,14 @@ def test_every_cached_answer_still_validates_against_its_schema() -> None:
     entries = ResponseCache().entries()
     if not entries:
         pytest.skip("run `make llm-fixtures` first")
-    models = {"hypothesis": Hypothesis, "induction": InducedRule}
+    models = {
+        "hypothesis": Hypothesis,
+        "induction": InducedRule,
+        "claim_draft": ClaimNarrative,
+        "intent": MetricIntent,
+    }
     for cached in entries:
+        assert cached.task in models, f"cached task {cached.task!r} has no schema to check"
         models[cached.task].model_validate(cached.response)
 
 

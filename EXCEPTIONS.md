@@ -32,6 +32,64 @@ Two counting rules, both aimed at not overstating the queue:
 
 ---
 
+## Still being chased
+
+**₹35,252.95 open across 20 claims · 3 expiring in 9 days**
+
+Sorted by expiry, not by creation date. These are exceptions someone else has to
+pay for: they are out of the seller's hands and on a clock.
+
+| claim | platform | cause | order | amount | status | deadline | clock |
+|---|---|---|---|---|---|---|---|
+| `CLM-0029` | myntra | `promo_cofunding_deduction` | `ord_000533` | ₹212.56 | filed | 2025-03-25 | 9 days left |
+| `CLM-0030` | myntra | `promo_cofunding_deduction` | `ord_000558` | ₹81.84 | filed | 2025-03-25 | 9 days left |
+| `CLM-0031` | myntra | `promo_cofunding_deduction` | `ord_000563` | ₹249.36 | filed | 2025-03-25 | 9 days left |
+| `CLM-0034` | amazon | `missing_settlement_row` | `ord_000523` | ₹1903.73 | drafted | 2025-04-01 | 16 days left |
+| `CLM-0035` | myntra | `promo_cofunding_deduction` | `ord_000669` | ₹460.56 | filed | 2025-04-01 | 16 days left |
+| `CLM-0036` | myntra | `promo_cofunding_deduction` | `ord_000726` | ₹313.12 | filed | 2025-04-01 | 16 days left |
+| `CLM-0037` | flipkart | `weight_dispute_hold` | `ord_000727` | ₹1593.96 | filed | 2025-04-01 | 16 days left |
+| `CLM-0038` | myntra | `promo_cofunding_deduction` | `ord_000733` | ₹369.32 | filed | 2025-04-01 | 16 days left |
+| `CLM-0039` | flipkart | `weight_dispute_hold` | `ord_000736` | ₹2765.51 | filed | 2025-04-01 | 16 days left |
+| `CLM-0040` | flipkart | `weight_dispute_hold` | `ord_000763` | ₹1394.68 | drafted | 2025-04-01 | 16 days left |
+| `CLM-0049` | amazon | `promo_cofunding_deduction` | `ord_000861` | ₹207.96 | filed | 2025-04-08 | 23 days left |
+| `CLM-0052` | amazon | `promo_cofunding_deduction` | `ord_000925` | ₹48.60 | filed | 2025-04-08 | 23 days left |
+| `CLM-0056` | amazon | `promo_cofunding_deduction` | `ord_001011` | ₹143.42 | filed | 2025-04-15 | 30 days left |
+| `CLM-0057` | amazon | `promo_cofunding_deduction` | `ord_001048` | ₹100.44 | filed | 2025-04-15 | 30 days left |
+| `CLM-0048` | website | `chargeback_deduction` | `ord_000824` | ₹3435.95 | filed | — | no configured window |
+| `CLM-0050` | website | `chargeback_deduction` | `ord_000911` | ₹1064.28 | filed | — | no configured window |
+| `CLM-0051` | website | `chargeback_deduction` | `ord_000923` | ₹6203.07 | drafted | — | no configured window |
+| `CLM-0053` | website | `chargeback_deduction` | `ord_000951` | ₹6518.45 | filed | — | no configured window |
+| `CLM-0054` | website | `chargeback_deduction` | `ord_000976` | ₹2260.37 | filed | — | no configured window |
+| `CLM-0055` | website | `chargeback_deduction` | `ord_000982` | ₹5925.77 | drafted | — | no configured window |
+
+6 of these have no configured filing window in
+`config/thresholds.yaml`. They are shown last and carry no countdown, because
+inventing one would put a deadline on screen that no agreement backs.
+
+---
+
+## Expired unrecovered
+
+**11 claims, ₹17516.77.** The filing window closed and no credit ever
+matched them. This is the most expensive list in the file: every row here is money
+the system identified, chased, and then lost to a clock.
+
+| claim | platform | cause | order | amount | opened | expired on |
+|---|---|---|---|---|---|---|
+| `CLM-0005` | myntra | `tcs_timing_mismatch` | `ord_000116` | ₹19.51 | batch 3 | 2025-02-10 |
+| `CLM-0001` | flipkart | `weight_dispute_hold` | `ord_000006` | ₹3192.23 | batch 1 | 2025-02-11 |
+| `CLM-0002` | flipkart | `weight_dispute_hold` | `ord_000015` | ₹2673.98 | batch 1 | 2025-02-11 |
+| `CLM-0004` | flipkart | `short_payment_unexplained` | `ord_000114` | ₹429.51 | batch 2 | 2025-02-18 |
+| `CLM-0006` | flipkart | `weight_dispute_hold` | `ord_000251` | ₹2263.81 | batch 4 | 2025-03-04 |
+| `CLM-0007` | flipkart | `weight_dispute_hold` | `ord_000297` | ₹1810.95 | batch 4 | 2025-03-04 |
+| `CLM-0008` | flipkart | `weight_dispute_hold` | `ord_000303` | ₹2666.68 | batch 4 | 2025-03-04 |
+| `CLM-0028` | flipkart | `tcs_timing_mismatch` | `ord_000464` | ₹26.48 | batch 7 | 2025-03-10 |
+| `CLM-0009` | amazon | `missing_settlement_row` | `ord_000040` | ₹2162.67 | batch 5 | 2025-03-11 |
+| `CLM-0015` | myntra | `missing_settlement_row` | `ord_000203` | ₹2152.07 | batch 5 | 2025-03-11 |
+| `CLM-0017` | myntra | `short_payment_unexplained` | `ord_000396` | ₹118.88 | batch 5 | 2025-03-11 |
+
+---
+
 ## Batch 01 — 23 new
 
 *118 orders are inside their settlement window: carried forward, not queued.*

@@ -17,10 +17,12 @@ ui/dist/
 .env
 
 # Derived output; regenerate with `make demo`.
-# EXCEPTIONS.md is committed on purpose: it is the honest half of the result.
-# data/llm_cache/ and data/resolutions.json ARE committed: the cache is what makes a
-# rerun deterministic and free, and the resolution log is the root of every provenance
-# chain in the system.
+# EXCEPTIONS.md and RESULTS.md are committed on purpose: one is the honest half of the
+# result, the other is the harness output verbatim, and the README quotes both.
+# data/llm_cache/, data/resolutions.json, data/questions.json and data/pins.json ARE
+# committed: the cache is what makes a rerun deterministic and free, the resolution log
+# is the root of every provenance chain, and the question log and the pins are the
+# operator's side of the reporting surface -- definitions, never numbers.
 data/reconciliation.json
 data/score.json
 data/learning.json

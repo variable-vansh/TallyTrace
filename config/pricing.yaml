@@ -1,6 +1,6 @@
-# LLM pricing. Nothing uses this yet -- checkpoint 3 makes the first call -- but the
-# harness reports rupee cost per reconciled transaction, and that arithmetic is
-# exercised now rather than bolted on next to the model that changes the number.
+# LLM pricing. The harness reports rupee cost per reconciled transaction, and this is
+# where every rate behind that number comes from. Written before the first model call
+# existed, so that adding a model and reading a cost were two changes rather than one.
 #
 # Anthropic first-party API rates, USD per million tokens.
 

@@ -1,0 +1,21 @@
+{
+  "key": "71bf7c5ec7ff93e417eefc709c4cf0f3",
+  "model": "claude-opus-5",
+  "request": {
+    "system": "You map a question about a reconciliation dashboard onto exactly one metric from a fixed registry, or you decline.\n\nYou never compute anything, you never write a query, and you never see the data. You choose an id and its parameters, and a deterministic function does the rest.\n\nRules you must follow:\n- Choose only from the metric ids in the schema. There is no nearest match and no \"closest available\" answer.\n- Choose a grouping the metric supports. The catalogue below lists them per metric.\n- restatement is required on every outcome. Write what is about to be computed in one plain sentence, as it will be shown to the operator for confirmation before it runs. Name the metric in words, the grouping, and any channel or batch range you set.\n- Use outcome \"clarify\" when two metrics could genuinely be meant, or when the question turns on a distinction the registry draws and the asker did not. Ask exactly one question. Do not also pick a metric.\n- Use outcome \"refuse\" when nothing in the registry answers the question. Say plainly what is not available. Do not offer a different chart as a consolation, and do not suggest the answer might be approximated by something adjacent -- an approximate answer to a money question is worse than no answer, because nobody checks it.\n- Set from_batch and to_batch only if the question names a period. A batch is one week; batch one is the earliest.",
+    "tool": "map_to_metric",
+    "user": "The registry of metrics that can be computed:\n\n- net_revenue_by_channel [inr] (group by: channel, batch)\n    Money that actually reached the bank, after every platform deduction.\n- gross_order_value [inr] (group by: channel, batch)\n    What customers paid, from the seller's own ledger, before any deduction.\n- effective_take_rate [pct] (group by: channel, batch)\n    Every deduction -- commission, GST on commission, TCS and TDS -- as a percentage of gross order value. A rising line is the take rate climbing.\n- commission_share_of_gross [pct] (group by: channel, batch)\n    Platform and fulfilment fee alone, excluding tax withholding.\n- exception_count_by_cause [count] (group by: cause)\n    How many exceptions each cause produced across the window.\n- review_rate_trend [pct] (group by: batch)\n    Settlement rows still needing a human after learned rules fire, as a percentage of the batch.\n- auto_resolved_rows [count] (group by: batch)\n    Settlement rows a learned rule closed without a human, per batch.\n- claim_recovery_rate [pct] (group by: platform)\n    Share of settled claims that recovered, per platform. Claims still inside their filing window are not counted either way.\n- open_claim_value [inr] (group by: platform)\n    Rupees still being chased, per platform.\n- rupees_expired_unrecovered [inr] (group by: batch)\n    Money whose filing window closed with no recovery, per batch.\n\nChannels in this business: amazon, flipkart, myntra, website, offline.\nThe corpus is ten weekly batches, numbered one to ten.\n\nThe operator asked:\n\n    \"How much money are we still chasing, by platform?\"\n\nMap it, ask one clarifying question, or refuse."
+  },
+  "response": {
+    "group_by": "platform",
+    "metric_id": "open_claim_value",
+    "outcome": "mapped",
+    "restatement": "The rupee value of claims still open, totalled per platform."
+  },
+  "source": "transcript",
+  "task": "intent",
+  "usage": {
+    "input_tokens": 846,
+    "output_tokens": 44
+  }
+}

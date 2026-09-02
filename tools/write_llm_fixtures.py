@@ -29,9 +29,11 @@ from pipeline.cases import FindingLog, build_cases
 from pipeline.config import CONFIG_DIR, load_yaml
 from pipeline.llm.cache import SOURCE_TRANSCRIPT, CacheEntry, ResponseCache, estimate_tokens, key_for
 from pipeline.llm.client import Ask
+from pipeline.llm.drafts import DraftQuestion, ask_for as draft_ask
+from pipeline.llm.intent import ask_for as intent_ask
 from pipeline.llm.hypotheses import Question, ask_for as hypothesis_ask, questions_in
 from pipeline.llm.induction import ask_for as induction_ask
-from pipeline.llm.schemas import Hypothesis, InducedRule, json_schema
+from pipeline.llm.schemas import ClaimNarrative, Hypothesis, InducedRule, MetricIntent, json_schema
 from pipeline.matcher import Bucket
 from pipeline.run import run_all
 
@@ -353,6 +355,173 @@ HYPOTHESES: dict[tuple, tuple[str, str, str]] = {
 
 
 # --------------------------------------------------------------------------- #
+# Checkpoint 4 -- claim narratives
+# --------------------------------------------------------------------------- #
+
+# (platform, cause) -> (subject, statement, request). One answer per *kind* of claim,
+# because the prompt carries no order and no amount -- see pipeline/llm/drafts.py.
+# Not one numeral anywhere below: the schema rejects them, and every figure in the
+# finished letter is substituted from the matcher's verdicts.
+NARRATIVES: dict[tuple[str, str], tuple[str, str, str]] = {
+    ("amazon", "missing_settlement_row"): (
+        "Missing settlement line for a delivered order",
+        "Our books record this order as sold, dispatched and delivered, and the payout "
+        "window for it has now closed. The settlement reports issued to us contain no line "
+        "for the order at all, so no commission, no tax collection and no net payout have "
+        "been reported against it.",
+        "Please reissue the settlement line and release the net due, or tell us the "
+        "settlement reference under which it was already remitted.",
+    ),
+    ("myntra", "missing_settlement_row"): (
+        "Order sold and delivered with no settlement line issued",
+        "This order appears in our books as sold and delivered and its expected payout date "
+        "has passed. No settlement line for it exists in any report sent to us, so nothing "
+        "has been reported against the order and nothing has been paid.",
+        "Please issue the settlement line for this order and pay the net due, or confirm "
+        "the settlement reference it was remitted under.",
+    ),
+    ("flipkart", "short_payment_unexplained"): (
+        "Payout below the net due, with nothing on the report to explain it",
+        "The amount credited against this order is below the net our books expect once the "
+        "agreed commission and statutory collections are applied. Nothing in the settlement "
+        "report — no fee line, no adjustment and no deduction — accounts for the difference.",
+        "Please itemise the deduction that produced this shortfall or remit the balance.",
+    ),
+    ("myntra", "short_payment_unexplained"): (
+        "Unexplained shortfall against the net due on this order",
+        "The credit received for this order falls short of the net our books expect after "
+        "the agreed commission and statutory collections. The settlement report carries no "
+        "deduction, adjustment or fee line that explains the gap.",
+        "Please identify the deduction responsible or release the outstanding balance.",
+    ),
+    ("flipkart", "weight_dispute_hold"): (
+        "Payout held against an open shipping-weight discrepancy",
+        "This order is reported as sold and your commission has been retained against it, "
+        "but no payout has been released because a shipping-weight discrepancy is open. Our "
+        "dispatch record for the consignment matches the weight declared at manifest.",
+        "Please review the weight evidence and release the held payout, or share the "
+        "measurement record you are relying on.",
+    ),
+    ("amazon", "promo_cofunding_deduction"): (
+        "Promotional co-funding deducted without prior notice",
+        "A deduction has been taken against this order as a seller share of a promotional "
+        "campaign cost, over and above the agreed referral commission. We hold no record of "
+        "accepting that campaign, and no itemised breakdown accompanied the charge.",
+        "Please itemise the campaign this charge relates to and reverse it where our "
+        "participation was not confirmed in writing.",
+    ),
+    ("myntra", "promo_cofunding_deduction"): (
+        "Campaign cost charged back without an agreed enrolment",
+        "The deduction taken against this order exceeds what our rate card provides for, and "
+        "the excess is described as a share of promotional cost. No enrolment in that "
+        "campaign was confirmed with us and no breakdown accompanied the charge.",
+        "Please provide the itemised campaign charge and reverse it where enrolment cannot "
+        "be evidenced.",
+    ),
+    ("website", "chargeback_deduction"): (
+        "Chargeback debited without a representment window",
+        "A chargeback has been debited against this settled order. We were not notified of "
+        "the dispute before the debit was taken and were given no opportunity to submit "
+        "delivery evidence in response.",
+        "Please reopen the dispute for representment and hold the debit until our evidence "
+        "has been assessed.",
+    ),
+}
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 -- intent mapping
+# --------------------------------------------------------------------------- #
+
+# question -> the mapping. Three of the eleven are not answers, and they are the
+# interesting three: one clarification and two refusals. See tools/operator_questions.py.
+INTENTS: dict[str, dict[str, Any]] = {
+    "How much did we actually get paid by each channel?": {
+        "outcome": "mapped",
+        "metric_id": "net_revenue_by_channel",
+        "group_by": "channel",
+        "restatement": "Net revenue settled — money that actually reached the bank after "
+                       "every platform deduction — totalled per channel across all ten weeks.",
+    },
+    "Is Myntra taking a bigger cut than it used to?": {
+        "outcome": "mapped",
+        "metric_id": "effective_take_rate",
+        "group_by": "batch",
+        "channel": "myntra",
+        "restatement": "Myntra's effective take rate — commission, GST on commission, TCS "
+                       "and TDS as a percentage of gross order value — plotted week by week.",
+    },
+    "What share of gross are the platforms keeping across the board?": {
+        "outcome": "mapped",
+        "metric_id": "effective_take_rate",
+        "group_by": "channel",
+        "restatement": "The effective take rate — every deduction as a percentage of gross "
+                       "order value — for each channel across the whole corpus.",
+    },
+    "Which causes are generating the most exceptions?": {
+        "outcome": "mapped",
+        "metric_id": "exception_count_by_cause",
+        "group_by": "cause",
+        "restatement": "A count of exceptions by cause across all ten weeks, largest first.",
+    },
+    "Is the manual review rate actually coming down?": {
+        "outcome": "mapped",
+        "metric_id": "review_rate_trend",
+        "group_by": "batch",
+        "restatement": "The manual review rate — settlement rows still needing a human after "
+                       "learned rules fire, as a percentage of the batch — plotted per week.",
+    },
+    "How much money are we still chasing, by platform?": {
+        "outcome": "mapped",
+        "metric_id": "open_claim_value",
+        "group_by": "platform",
+        "restatement": "The rupee value of claims still open, totalled per platform.",
+    },
+    "How much have we lost to claims that expired before we filed them?": {
+        "outcome": "mapped",
+        "metric_id": "rupees_expired_unrecovered",
+        "group_by": "batch",
+        "restatement": "Rupees on claims whose filing window closed with no recovery, shown "
+                       "for the week each one lapsed in.",
+    },
+    "Show me net revenue by channel for the first four weeks only": {
+        "outcome": "mapped",
+        "metric_id": "net_revenue_by_channel",
+        "group_by": "channel",
+        "from_batch": 1,
+        "to_batch": 4,
+        "restatement": "Net revenue settled per channel, restricted to batches one through "
+                       "four.",
+    },
+    "How are our fees trending?": {
+        "outcome": "clarify",
+        "restatement": "Two different metrics answer this and they diverge by several "
+                       "percentage points, so nothing has been computed yet.",
+        "clarifying_question": "Do you mean the platform commission on its own, or every "
+                               "deduction including the GST charged on that commission and "
+                               "the tax collected at source?",
+    },
+    "Which of our SKUs are least profitable?": {
+        "outcome": "refuse",
+        "restatement": "Nothing has been computed: the registry has no metric that answers "
+                       "this question.",
+        "refusal": "This reconciliation holds orders, settlements and bank credits. It has "
+                   "no product master and no cost of goods, so profitability per SKU cannot "
+                   "be computed here at all — not approximately, and not from an adjacent "
+                   "figure.",
+    },
+    "What will next month's settlement come to?": {
+        "outcome": "refuse",
+        "restatement": "Nothing has been computed: the registry measures what happened and "
+                       "does not forecast.",
+        "refusal": "Every metric in the registry is a measurement over settled batches. "
+                   "There is no forecasting metric, and projecting one of these series "
+                   "forward would produce a number with a reconciliation's authority and a "
+                   "guess's accuracy.",
+    },
+}
+
+# --------------------------------------------------------------------------- #
 # Writing
 # --------------------------------------------------------------------------- #
 
@@ -430,6 +599,71 @@ def write_inductions(cache: ResponseCache, model: str, chars: Decimal) -> int:
     return written
 
 
+#: A narrative that satisfies the schema and is never written to disk. It exists only
+#: so that a shape-collecting run can complete; the real answers are in NARRATIVES.
+PROBE = ClaimNarrative(
+    subject="Placeholder subject for a shape-collecting run",
+    statement="This narrative exists only to let a discovery run finish and is never cached.",
+    request="Discard this text; it is not a claim.",
+)
+
+
+def claim_draft_shapes() -> set[tuple[str, str]]:
+    """Every (platform, cause) a real run actually asks for a claim draft on.
+
+    Derived rather than declared. The alternative -- a hand-written list -- goes stale
+    the first time the corpus grows a shape, and the failure mode is a claim reaching
+    an operator with no words around it.
+    """
+    from pipeline.learn import run as run_learning
+
+    shapes: set[tuple[str, str]] = set()
+
+    def collect(platform: str, cause: str, batch: int) -> ClaimNarrative:
+        shapes.add((platform, cause))
+        return PROBE
+
+    run_learning(narrator=collect)
+    return shapes
+
+
+def write_narratives(cache: ResponseCache, model: str, chars: Decimal) -> int:
+    """One narrative per (platform, cause) the register actually opens a draft for.
+
+    The pairs are read off a real run rather than listed by hand, so a shape that
+    starts appearing in the corpus fails loudly here instead of arriving in front of
+    an operator with no words around it.
+    """
+    written = 0
+    for platform, cause in sorted(claim_draft_shapes()):
+        answer = NARRATIVES.get((platform, cause))
+        if answer is None:
+            raise KeyError(f"no authored claim narrative for {(platform, cause)}")
+        subject, statement, request = answer
+        payload = {"subject": subject, "statement": statement, "request": request}
+        ClaimNarrative.model_validate(payload)
+        cache.put(
+            _entry(draft_ask(DraftQuestion(platform, cause)), "claim_draft", payload, model, chars)
+        )
+        written += 1
+    return written
+
+
+def write_intents(cache: ResponseCache, model: str, chars: Decimal) -> int:
+    """One answer per question the operator asked. Billed to batch 10, where they asked."""
+    from tools.operator_questions import QUESTIONS
+
+    written = 0
+    for asked in QUESTIONS:
+        payload = INTENTS.get(asked.question)
+        if payload is None:
+            raise KeyError(f"no authored intent mapping for {asked.question!r}")
+        MetricIntent.model_validate(payload)
+        cache.put(_entry(intent_ask(asked.question), "intent", payload, model, chars))
+        written += 1
+    return written
+
+
 def main() -> int:
     pricing = load_yaml(CONFIG_DIR / "pricing.yaml")
     model = str(pricing["model"])
@@ -438,8 +672,13 @@ def main() -> int:
 
     hypotheses = write_hypotheses(cache, model, chars)
     inductions = write_inductions(cache, model, chars)
+    narratives = write_narratives(cache, model, chars)
+    intents = write_intents(cache, model, chars)
     entries = cache.entries()
-    print(f"{hypotheses} hypothesis questions, {inductions} induction prompts")
+    print(
+        f"{hypotheses} hypothesis questions, {inductions} induction prompts, "
+        f"{narratives} claim narratives, {intents} intent mappings"
+    )
     print(f"{len(entries)} distinct cache entries -> {cache.directory}")
     print(f"  {sum(e.input_tokens for e in entries)} input + "
           f"{sum(e.output_tokens for e in entries)} output tokens (estimated)")

@@ -2,7 +2,7 @@ import {
   Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { TrendingDown, TrendingUp, Minus, ShieldCheck, Brain, IndianRupee, Layers } from 'lucide-react'
+import { TrendingDown, TrendingUp, Minus, ShieldCheck, Brain, IndianRupee, Layers, Gavel } from 'lucide-react'
 import StatCard from '../components/StatCard'
 import StatusBadge from '../components/StatusBadge'
 import { inr, pct } from '../lib/format'
@@ -11,6 +11,16 @@ const AXIS = { fill: '#6B7280', fontSize: 12 }
 const TOOLTIP = {
   contentStyle: { borderRadius: '8px', border: '1px solid #E7E7EA', fontSize: 12 },
   itemStyle: { fontWeight: 600 },
+}
+
+function Figure({ label, value, sub, tone = 'text-gray-900' }) {
+  return (
+    <div>
+      <div className="text-xs text-muted uppercase tracking-wide">{label}</div>
+      <div className={`text-2xl font-bold ${tone}`}>{value ?? '—'}</div>
+      {sub && <div className="text-xs text-muted">{sub}</div>}
+    </div>
+  )
 }
 
 export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
@@ -89,15 +99,16 @@ export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
                 <Area
                   type="monotone" dataKey="matcher" name="Matcher alone" stroke="#9CA3AF"
                   strokeWidth={2} strokeDasharray="4 3" fill="none" dot={false}
+                  isAnimationActive={false}
                 />
                 <Area
                   type="monotone" dataKey="net" name="After learned rules" stroke="#3D4FE0"
-                  strokeWidth={3} fill="url(#fillNet)"
+                  strokeWidth={3} fill="url(#fillNet)" isAnimationActive={false}
                   activeDot={{ r: 5, fill: '#3D4FE0', stroke: 'white', strokeWidth: 2 }}
                 />
                 <Area
                   type="monotone" dataKey="touch" name="Human decisions" stroke="#1FAA59"
-                  strokeWidth={2.5} fill="none"
+                  strokeWidth={2.5} fill="none" isAnimationActive={false}
                   activeDot={{ r: 5, fill: '#1FAA59', stroke: 'white', strokeWidth: 2 }}
                 />
               </AreaChart>
@@ -107,12 +118,43 @@ export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
       </div>
 
       {/* Stat row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="Settlement rows" value={stats.totalTransactions} delta={delta('totalTransactions')} />
         <StatCard label="Auto-matched" value={stats.autoMatched} delta={delta('autoMatched')} icon={ShieldCheck} />
         <StatCard label="Auto-resolved" value={stats.autoResolved} delta={delta('autoResolved')} icon={Brain} />
         <StatCard label="Flagged for review" value={stats.flaggedForReview} delta={delta('flaggedForReview')} />
         <StatCard label="Batch proposals" value={stats.bulkFixOpportunities} delta={delta('bulkFixOpportunities')} icon={Layers} />
+        <StatCard label="Claims opened" value={weekData.claims?.opened?.length ?? 0} icon={Gavel} />
+      </div>
+
+      {/* Claims: the deadline clock, on the front page rather than three screens in */}
+      <div className="bg-white rounded-2xl border border-divider p-6">
+        <div className="flex items-baseline justify-between flex-wrap gap-2">
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wide">
+            Claims queue
+          </h2>
+          <span className="text-xs text-muted">
+            whole register, end of batch {allWeeks.length} · sorted by expiry, not creation date
+          </span>
+        </div>
+        <p className="text-xl font-bold text-gray-900 mt-1">{data.claimsQueue?.header}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-divider">
+          <Figure label="Opened" value={data.totals?.claims_opened} />
+          <Figure label="Recovered" value={data.totals?.claims_recovered}
+                  sub={inr(Number(data.totals?.rupees_recovered ?? 0), { whole: true })}
+                  tone="text-success" />
+          <Figure label="Expired" value={data.totals?.claims_expired}
+                  sub={inr(Number(data.totals?.rupees_expired ?? 0), { whole: true })}
+                  tone="text-danger" />
+          <Figure label="Recovery rate" value={pct(data.totals?.claim_recovery_rate_pct, 2)}
+                  sub="of settled claims" />
+        </div>
+        <p className="text-xs text-muted mt-4 leading-relaxed">
+          Amazon&rsquo;s SAFE-T window is 30 days; a TCS discrepancy has to be raised before the
+          10th of the following month or the GSTR-8 correction misses its return. Sellers lose
+          this money because they discover the loss at reconciliation time, which is already
+          late — so the clock starts the moment the reconciliation surfaces it.
+        </p>
       </div>
 
       {/* Precision + money */}
@@ -134,7 +176,7 @@ export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
                 <Tooltip {...TOOLTIP} formatter={(v) => [`${v}%`, 'Precision']} />
                 <Line
                   type="monotone" dataKey="precision" stroke="#1FAA59" strokeWidth={3}
-                  connectNulls dot={{ r: 3, fill: '#1FAA59' }}
+                  connectNulls dot={{ r: 3, fill: '#1FAA59' }} isAnimationActive={false}
                   activeDot={{ r: 6, fill: '#1FAA59', stroke: 'white', strokeWidth: 2 }}
                 />
               </LineChart>

@@ -14,6 +14,7 @@ allowed to name its path. The pipeline never does.
 
 from __future__ import annotations
 
+import argparse
 import json
 import time
 from dataclasses import dataclass
@@ -22,9 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from harness import aging as aging_module
+from harness import claims as claims_module
 from harness import report
+from harness import reporting as reporting_module
 from harness.aging import Aging
 from harness.attribution import CauseConfusion, RowOutcome, attribute, confusion, silent_clears
+from harness.claims import ClaimScore
+from harness.reporting import ReportingScore
 from harness.cost import Pricing, pricing_from
 from harness.exceptions import open_exceptions, render as render_exceptions
 from harness.learning import LearningScore, auto_resolutions
@@ -40,11 +45,13 @@ from harness.metrics import (
 )
 from harness.truth import AnswerKey, load_answer_key
 from pipeline.cases import FindingLog
-from pipeline.config import CONFIG_DIR, REPO_ROOT, generation, load_yaml, thresholds
+from pipeline.claims.queue import QueueView, build as build_queue
+from pipeline.config import CONFIG_DIR, REPO_ROOT, batch_window, generation, load_yaml, thresholds
 from pipeline.learn import LearningRun, run_learning_batch
 from pipeline.llm.client import client_from
 from pipeline.loader import load_batch
 from pipeline.matcher import BatchResult, match_config_from
+from pipeline.metrics.registry import REGISTRY
 from pipeline.rules import resolutions as operator_log
 from pipeline.rules import store as rule_store
 from pipeline.rules.models import RuleState
@@ -52,6 +59,7 @@ from pipeline.run import OpenBook, run_batch
 
 SCORE_JSON = REPO_ROOT / "data" / "score.json"
 EXCEPTIONS_MD = REPO_ROOT / "EXCEPTIONS.md"
+RESULTS_MD = REPO_ROOT / "RESULTS.md"
 ZERO = Decimal("0.00")
 
 
@@ -68,6 +76,9 @@ class Score:
     pricing: Pricing
     proposals: list[AutoResolution]
     learning: LearningScore
+    claims: ClaimScore
+    queue: QueueView
+    reporting: ReportingScore
     run: LearningRun
 
     def new_findings(self, result: BatchResult) -> list[Any]:
@@ -97,8 +108,8 @@ def _cause_by_row(key: AnswerKey) -> dict[tuple[str, str], str]:
 
 
 def _reconcile_all(
-    generated_dir: Path | None, cache_dir: Path | None
-) -> tuple[LearningRun, list[tuple[int, float]]]:
+    generated_dir: Path | None, cache_dir: Path | None, allow_network: bool
+) -> tuple[LearningRun, list[tuple[int, float]], ReportingScore]:
     """Run the whole loop batch by batch, timing each.
 
     The learning loop *contains* the matcher -- it reconciles, queues, hypothesises,
@@ -119,24 +130,31 @@ def _reconcile_all(
         cache_dir=cache_dir,
         ledger=record.ledger,
         chars_per_token=Decimal(str(pricing_cfg["estimated_chars_per_token"])),
+        allow_network=allow_network,
     )
 
     for batch in range(1, int(generation()["batch_count"]) + 1):
         tables = load_batch(batch, generated_dir)
         started = time.perf_counter()
         learned = run_learning_batch(
-            tables, book, cfg, record.store, client, log, finding_log
+            tables, book, cfg, record.store, client, log, finding_log, record.register
         )
         timings.append((tables.rows_read, time.perf_counter() - started))
         record.batches.append(learned)
+    # The reporting surface is replayed after the corpus is complete, and its intent
+    # calls are billed to the last batch through the same ledger. A cost per
+    # transaction that excluded the surface the operator actually types into would be
+    # a cost for a subset of the system.
+    surface = reporting_module.score(record, client, record.batches[-1].batch)
     record.tokens_estimated = client.tokens_estimated
-    return record, timings
+    return record, timings, surface
 
 
 def run(
     generated_dir: Path | None = None,
     truth_dir: Path | None = None,
     cache_dir: Path | None = None,
+    allow_network: bool = True,
 ) -> Score:
     """Reconcile and learn across every batch, timing each, then score against the key.
 
@@ -145,7 +163,7 @@ def run(
     before anything filled them, and this is the checkpoint that fills them.
     """
     pricing = pricing_from(load_yaml(CONFIG_DIR / "pricing.yaml"))
-    record, timings = _reconcile_all(generated_dir, cache_dir)
+    record, timings, surface = _reconcile_all(generated_dir, cache_dir, allow_network)
     results = record.results
     usage = record.ledger
     accepted = auto_resolutions(record)
@@ -171,6 +189,7 @@ def run(
     key = load_answer_key(truth_dir)
     outcomes = attribute(results, key)
     held_out = sorted(generation()["held_out"])
+    corpus_end = batch_window(results[-1].batch)[1]
     return Score(
         results=results,
         metrics=metrics,
@@ -181,6 +200,9 @@ def run(
         pricing=pricing,
         proposals=accepted,
         learning=score_learning(record, key, held_out),
+        claims=claims_module.score(record, key),
+        queue=build_queue(record.register.claims, corpus_end),
+        reporting=surface,
         run=record,
     )
 
@@ -258,6 +280,19 @@ def _totals(score: Score, precision: Decimal | None) -> dict[str, Any]:
         ),
         "llm_model": score.pricing.model,
         "llm_tokens_estimated": score.run.tokens_estimated,
+        "claims_opened": score.claims.opened,
+        "claims_recovered": len(score.claims.recovered),
+        "claims_expired": len(score.claims.expired),
+        "claims_open": len(score.claims.still_open),
+        "rupees_recovered": str(score.claims.rupees_recovered),
+        "rupees_expired": str(score.claims.rupees_expired),
+        "claim_recovery_rate_pct": str(score.claims.recovery_rate),
+        "claims_queue_header": score.queue.header,
+        "registered_metrics": len(REGISTRY),
+        "questions_asked": len(score.reporting.answers),
+        "questions_mapped": score.reporting.mapped,
+        "questions_declined": score.reporting.declined,
+        "pinned_metrics": len(score.reporting.pins),
     }
 
 
@@ -273,6 +308,9 @@ def to_json(score: Score) -> dict[str, Any]:
         "batches": [metric.to_json() for metric in score.metrics],
         "totals": _totals(score, precision),
         "learning": score.learning.to_json(),
+        "claims": score.claims.to_json(),
+        "claims_queue": score.queue.to_json(),
+        "reporting": score.reporting.to_json(),
         "rules": score.run.store.to_json()["rules"],
         "cause_confusion": _confusion_json(score),
         "silent_clears": _silent_clear_json(score),
@@ -299,22 +337,52 @@ def to_text(score: Score) -> str:
             ),
             report.abstention(list(score.learning.abstentions)),
             report.rules(score.run.store, list(score.learning.rule_truth)),
+            report.claims(score.claims, score.queue),
+            report.claim_recovery(score.claims),
+            report.claim_attribution(score.claims),
+            report.reporting(score.reporting, len(REGISTRY)),
+            report.pinned(score.reporting),
             report.honesty(quarantine, score.open_exception_count, score.open_exception_impact),
         ]
     )
 
 
 def main() -> int:
-    score = run()
-    print(to_text(score), end="")
+    parser = argparse.ArgumentParser(description="Score the pipeline against the answer key.")
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="never call the API, even with a key set; answer only from data/llm_cache",
+    )
+    args = parser.parse_args()
+    score = run(allow_network=not args.offline)
+    report_text = to_text(score)
+    print(report_text, end="")
 
     SCORE_JSON.write_text(json.dumps(to_json(score), indent=2) + "\n", encoding="utf-8")
-    EXCEPTIONS_MD.write_text(render_exceptions(score.results, score.aging), encoding="utf-8")
+    # The same report, verbatim, as a committed artifact. The README quotes figures out
+    # of it; this is the file those figures are traceable to, and it is rewritten on
+    # every run so it cannot quietly describe an older one.
+    RESULTS_MD.write_text(
+        "# RESULTS\n\nVerbatim output of `make score` over the ten shipped batches.\n"
+        "Regenerated on every run; nothing here is typed by hand.\n\n```\n"
+        + report_text
+        + "```\n",
+        encoding="utf-8",
+    )
+    EXCEPTIONS_MD.write_text(
+        render_exceptions(
+            score.results, score.aging, score.queue, list(score.claims.claims)
+        ),
+        encoding="utf-8",
+    )
     # The rule store is written here as well as by `make learn`, so one command
     # produces every artifact the UI and the tests read and they all describe the
     # same run rather than two runs that happen to agree.
     rule_store.save(score.run.store)
-    print(f"\nwrote {SCORE_JSON.relative_to(REPO_ROOT)}, data/rules.json and EXCEPTIONS.md")
+    print(
+        f"\nwrote {SCORE_JSON.relative_to(REPO_ROOT)}, data/rules.json, "
+        "EXCEPTIONS.md and RESULTS.md"
+    )
     return 0
 
 

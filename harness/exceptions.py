@@ -8,16 +8,25 @@ Orders still inside their settlement window are summarised rather than itemised.
 They are not exceptions -- nobody works a payout that is not due yet -- but the
 count is stated, because silently omitting 1,100 rows from a file called
 EXCEPTIONS.md is the kind of omission this file exists to prevent.
+
+Two sections come from the claims register rather than from the matcher: the claims
+still open at the end of the corpus, and the ones whose filing window closed with no
+recovery. The second is the most expensive list in the file -- money that was
+identified, chased and then lost to a deadline -- and a file called EXCEPTIONS.md that
+listed only unmatched rows would leave it out.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 from decimal import Decimal
 from typing import Iterable
 
 from harness.aging import Aging
 from harness.metrics import CARRIED, is_open_exception
+from pipeline.claims.models import Claim, ClaimStatus
+from pipeline.claims.queue import QueueView
 from pipeline.matcher import BatchResult, Bucket, Verdict
 
 TABLE_LABEL = {
@@ -27,6 +36,8 @@ TABLE_LABEL = {
 }
 
 ZERO = Decimal("0.00")
+#: Sorts after every real deadline, so an unclocked claim lands last.
+_FAR = date.max
 DETAIL_KEYS = (
     "expected_fee", "charged_fee", "fee_delta", "expected_net", "settled_net",
     "net_delta", "tolerance_inr", "days_late", "settlement_sum", "bank_amount",
@@ -142,8 +153,77 @@ def _summary(results: Iterable[BatchResult], aging: Aging) -> list[str]:
     return lines
 
 
-def render(results: list[BatchResult], aging: Aging) -> str:
+def _claim_row(claim: Claim, days: int | None) -> str:
+    clock = "no configured window" if days is None else f"{days} days left"
+    return (
+        f"| `{claim.claim_id}` | {claim.platform} | `{claim.cause}` "
+        f"| {'`' + claim.order_key + '`' if claim.order_key else '—'} "
+        f"| ₹{claim.amount_inr} | {claim.status.value} "
+        f"| {claim.deadline.on or '—'} | {clock} |"
+    )
+
+
+def _open_claims(view: QueueView) -> list[str]:
+    """Claims still being chased when the corpus ends, soonest expiry first."""
+    lines = [
+        "## Still being chased",
+        "",
+        f"**{view.header}**",
+        "",
+        "Sorted by expiry, not by creation date. These are exceptions someone else has to",
+        "pay for: they are out of the seller's hands and on a clock.",
+        "",
+        "| claim | platform | cause | order | amount | status | deadline | clock |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    lines += [_claim_row(row.claim, row.days_remaining) for row in view.rows]
+    lines += [
+        "",
+        f"{view.unclocked_count} of these have no configured filing window in",
+        "`config/thresholds.yaml`. They are shown last and carry no countdown, because",
+        "inventing one would put a deadline on screen that no agreement backs.",
+        "",
+        "---",
+        "",
+    ]
+    return lines
+
+
+def _expired_claims(claims: list[Claim]) -> list[str]:
+    """Money that was found, chased and then lost to a deadline. The worst list here."""
+    expired = [claim for claim in claims if claim.status is ClaimStatus.EXPIRED]
+    total = sum((claim.amount_inr for claim in expired), ZERO)
+    lines = [
+        "## Expired unrecovered",
+        "",
+        f"**{len(expired)} claims, ₹{total}.** The filing window closed and no credit ever",
+        "matched them. This is the most expensive list in the file: every row here is money",
+        "the system identified, chased, and then lost to a clock.",
+        "",
+        "| claim | platform | cause | order | amount | opened | expired on |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    lines += [
+        f"| `{c.claim_id}` | {c.platform} | `{c.cause}` "
+        f"| {'`' + c.order_key + '`' if c.order_key else '—'} | ₹{c.amount_inr} "
+        f"| batch {c.opened_batch} | {c.deadline.on} |"
+        for c in sorted(expired, key=lambda c: (c.deadline.on or _FAR, c.claim_id))
+    ]
+    lines += ["", "---", ""]
+    return lines
+
+
+def render(
+    results: list[BatchResult],
+    aging: Aging,
+    view: QueueView | None = None,
+    claims: list[Claim] | None = None,
+) -> str:
     lines = _summary(results, aging)
+    if view is not None:
+        lines += _open_claims(view)
+    if claims:
+        lines += _expired_claims(claims)
     for result in results:
         lines += _batch_section(result, aging)
     return "\n".join(lines).rstrip() + "\n"

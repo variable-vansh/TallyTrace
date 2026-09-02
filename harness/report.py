@@ -11,10 +11,14 @@ from decimal import Decimal
 from typing import Iterable
 
 from harness.attribution import CauseConfusion, SilentClears
+from harness.claims import ClaimScore
 from harness.cost import Pricing, to_paise
 from harness.learning import Abstention, BatchLearningMetrics
 from harness.metrics import BatchMetrics, QuarantineSummary, pct
+from harness.reporting import ReportingScore
 from harness.truth import AnswerKey
+from pipeline.claims.queue import QueueView
+from pipeline.metrics.registry import COUNT, INR, PERCENT, MetricResult
 from pipeline.llm.usage import LlmUsage
 from pipeline.rules.models import RuleState
 from pipeline.rules.store import RuleStore
@@ -324,3 +328,185 @@ def rules(store: RuleStore, true_precision: list[tuple[str, Decimal | None, int]
         "       differ, the operator and the rule were fooled by the same row.",
     ]
     return lines
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 — the claims queue
+# --------------------------------------------------------------------------- #
+
+
+def claims(score: ClaimScore, view: QueueView) -> list[str]:
+    """What the register did, what it recovered, and what it let lapse."""
+    lines = _heading("claims queue — opened, recovered, expired, and the money on each")
+    lines.append(
+        f"{'batch':>5} {'opened':>7} {'draft':>6} {'filed':>6} {'recov':>6} {'exp':>4}"
+        f" {'₹ opened':>13} {'₹ recovered':>14} {'₹ expired':>12}"
+        f" {'open':>5} {'₹ open':>12}"
+    )
+    for batch in score.batches:
+        lines.append(
+            f"{batch.batch:>5} {batch.opened:>7} {batch.drafted:>6} {batch.filed:>6}"
+            f" {batch.recovered:>6} {batch.expired:>4} {'₹' + str(batch.rupees_opened):>13}"
+            f" {'₹' + str(batch.rupees_recovered):>14} {'₹' + str(batch.rupees_expired):>12}"
+            f" {batch.open_at_end:>5} {'₹' + str(batch.rupees_open_at_end):>12}"
+        )
+    lines += [
+        RULE,
+        f"       {score.opened} claims opened. {len(score.recovered)} recovered "
+        f"(₹{score.rupees_recovered}), {len(score.expired)} expired "
+        f"(₹{score.rupees_expired}), {len(score.still_open)} still open.",
+        f"       recovery rate on settled claims: {score.recovery_rate}%. Open claims are "
+        "not counted as either;",
+        "       a claim inside its window is not yet a result.",
+        "",
+        f"       queue as it stands: {view.header}",
+        "       Sorted by expiry, never by creation date. A claims list ordered by when it",
+        "       was raised buries the one that stops being recoverable on Thursday.",
+    ]
+    return lines
+
+
+def claim_recovery(score: ClaimScore) -> list[str]:
+    """Every planted recovery pair, and what the register did about it."""
+    lines = _heading("claim recovery — the planted reimbursements, one row each")
+    lines.append(f"{'order':<14}{'credit':<12}{'claimed in':>11}{'paid in':>9}"
+                 f"{'₹':>11}  outcome")
+    for entry in score.planted:
+        lines.append(
+            f"{entry.order_id:<14}{entry.row_id:<12}{'batch ' + str(entry.claim_batch):>11}"
+            f"{'batch ' + str(entry.recovery_batch):>9}{'₹' + str(entry.amount_inr):>11}"
+            f"  {entry.outcome}"
+        )
+    lines += [
+        RULE,
+        f"       {score.planted_caught} of {len(score.planted)} planted pairs auto-closed "
+        "against the credit that paid them.",
+        "       The misses are not link failures. In both, the reimbursement arrived while "
+        "the order was",
+        "       still inside its settlement window, so the matcher never raised it and no "
+        "claim was ever",
+        "       opened to close. A claim the system had no cause to open is not a claim it "
+        "failed to recover,",
+        "       and it is reported as a miss anyway because excluding it would be marking "
+        "its own homework.",
+    ]
+    return lines
+
+
+def claim_attribution(score: ClaimScore) -> list[str]:
+    """Whether the answer key agrees these were somebody else's problem."""
+    lines = _heading("claim attribution — did the answer key agree these were claims")
+    lines.append(
+        f"{'cause claimed':<32}{'claims':>7}{'confirmed':>11}{'precision':>11}"
+        f"{'self-closed misses':>20}"
+    )
+    for entry in score.attribution:
+        precision = "—" if entry.precision is None else f"{entry.precision}%"
+        lines.append(
+            f"{entry.cause:<32}{entry.claims:>7}{entry.confirmed:>11}{precision:>11}"
+            f"{entry.self_closed_misses:>20}"
+        )
+    total = sum(entry.claims for entry in score.attribution)
+    confirmed = sum(entry.confirmed for entry in score.attribution)
+    self_closed = sum(entry.self_closed_misses for entry in score.attribution)
+    lines += [
+        RULE,
+        f"       {confirmed} of {total} claims ({pct(confirmed, total)}%) are confirmed by "
+        "the answer key.",
+        f"       {self_closed} of the {total - confirmed} that are not closed themselves "
+        "when the money arrived,",
+        "       with no operator ever filing them.",
+        "",
+        "       Read the missing_settlement_row row and do not look away from it. The queue",
+        "       opens a claim whenever a payout is past its settlement window, and most of",
+        "       those turn out to be settlements that were merely late. That is a deliberate",
+        "       bias and the auto-close is what pays for it: chasing a late payout costs a",
+        "       claim that closes itself, and not chasing a genuinely missing one costs the",
+        "       whole payout once the filing window shuts. The bias is only affordable",
+        "       because the recovery match exists, which is why both numbers are printed",
+        "       side by side.",
+    ]
+    return lines
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 — the reporting surface
+# --------------------------------------------------------------------------- #
+
+
+def _value(result: MetricResult, value: Decimal) -> str:
+    if result.unit == INR:
+        return f"₹{value:,.2f}"
+    if result.unit == PERCENT:
+        return f"{value}%"
+    return str(value)
+
+
+def _points(result: MetricResult, indent: str = "           ") -> list[str]:
+    width = max((len(point.label) for point in result.points), default=8)
+    return [
+        f"{indent}{point.label:<{width}}  {_value(result, point.value):>14}"
+        for point in result.points
+    ]
+
+
+def reporting(score: ReportingScore, registry_size: int) -> list[str]:
+    """Every question asked, and what the registry did with it."""
+    lines = _heading("reporting — what the registry answered, and what it would not")
+    lines.append(
+        f"       {registry_size} registered metrics. {score.mapped} of "
+        f"{len(score.answers)} questions mapped; {score.declined} were clarified or refused."
+    )
+    lines.append(
+        "       No SQL is generated anywhere in this system. Enterprise text-to-SQL "
+        "execution accuracy"
+    )
+    lines.append(
+        "       runs roughly 21-39% on realistic schemas, and its failures are silent: a "
+        "valid query"
+    )
+    lines.append(
+        "       returns a plausible wrong number. A closed registry can only pick the wrong "
+        "id out of"
+    )
+    lines.append("       ten, and the restatement puts that choice in front of a human first.")
+    lines.append("")
+    for answer in score.answers:
+        lines.append(f"       [{answer.outcome:<8}] {answer.asked.question}")
+        lines.append(f"                  -> {answer.plan.restatement}")
+        if answer.outcome == "clarify":
+            lines.append(f"                  ?  {answer.plan.intent.clarifying_question}")
+        elif answer.outcome == "refuse":
+            lines.append(f"                  ✗  {answer.plan.intent.refusal}")
+    lines += [
+        RULE,
+        "       A refusal is the feature. The tempting failure on this surface is to answer",
+        "       an unanswerable question with a nearby chart, and a nearby chart carries the",
+        "       same authority as a correct one.",
+    ]
+    return lines
+
+
+def pinned(score: ReportingScore) -> list[str]:
+    """Every pinned metric, recomputed. No model was constructed to produce these."""
+    lines = _heading("pinned metrics — recomputed with no model in the loop")
+    if not score.pins:
+        lines.append("       nothing pinned.")
+        return lines
+    for pin, result in score.pins:
+        lines.append(f"       {pin.name}  [{result.metric_id} by {result.group_by}]")
+        lines.append(f'           pinned by {pin.pinned_by} on {pin.pinned_at}, from: '
+                     f'"{pin.source_question}"')
+        lines.extend(_points(result))
+        lines.append("")
+    lines += [
+        RULE,
+        "       The model was present at the moment of definition and is absent from every",
+        "       run afterwards. What is stored in data/pins.json is a metric id and its",
+        "       parameters -- never a number -- so these recompute from the reconciled data",
+        "       every batch. pipeline/metrics/pins.py:recompute constructs no client, reads",
+        "       no cache and renders no prompt; tests/test_pins.py asserts it by breaking",
+        "       the client first and recomputing the whole dashboard anyway.",
+    ]
+    return lines
+

@@ -1,0 +1,81 @@
+{
+  "questions": [
+    {
+      "question": "How much did we actually get paid by each channel?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": null
+    },
+    {
+      "question": "Is Myntra taking a bigger cut than it used to?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": "Myntra take rate, week by week"
+    },
+    {
+      "question": "What share of gross are the platforms keeping across the board?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": "Effective take rate by channel"
+    },
+    {
+      "question": "Which causes are generating the most exceptions?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": "Exceptions by cause"
+    },
+    {
+      "question": "Is the manual review rate actually coming down?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": "Manual review rate"
+    },
+    {
+      "question": "How much money are we still chasing, by platform?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": "Open claim value"
+    },
+    {
+      "question": "How much have we lost to claims that expired before we filed them?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": null
+    },
+    {
+      "question": "Show me net revenue by channel for the first four weeks only",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": true,
+      "pin_as": null
+    },
+    {
+      "question": "How are our fees trending?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": false,
+      "pin_as": null
+    },
+    {
+      "question": "Which of our SKUs are least profitable?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": false,
+      "pin_as": null
+    },
+    {
+      "question": "What will next month's settlement come to?",
+      "asked_by": "priya.n@demostore.in",
+      "asked_at": "2025-03-16",
+      "confirmed": false,
+      "pin_as": null
+    }
+  ]
+}

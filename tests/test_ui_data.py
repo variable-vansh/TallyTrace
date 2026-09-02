@@ -127,3 +127,119 @@ def test_the_ui_file_is_deterministic(scored) -> None:
     """Two builds from one score produce identical bytes, so a redeploy is a no-op
     unless something actually changed."""
     assert json.dumps(build(scored), sort_keys=True) == json.dumps(build(scored), sort_keys=True)
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 — claims and the reporting surface
+# --------------------------------------------------------------------------- #
+
+
+def test_the_claims_the_browser_sees_are_the_claims_the_harness_scored(artifacts) -> None:
+    score_json, ui = artifacts
+    assert len(ui["claims"]) == score_json["totals"]["claims_opened"]
+    assert ui["claimsQueue"]["header"] == score_json["totals"]["claims_queue_header"]
+    statuses = [claim["status"] for claim in ui["claims"]]
+    assert statuses.count("recovered") == score_json["totals"]["claims_recovered"]
+    assert statuses.count("expired") == score_json["totals"]["claims_expired"]
+
+
+def test_a_claims_rupee_survives_the_float_boundary(artifacts) -> None:
+    """The UI gets JSON numbers because charts do arithmetic; score.json keeps strings."""
+    _, ui = artifacts
+    for claim in ui["claims"]:
+        assert isinstance(claim["amount"], float)
+        assert D(str(claim["amount"])) == D(claim["amount_inr"])
+
+
+def test_the_pinned_metrics_the_browser_shows_are_the_ones_the_harness_recomputed(
+    artifacts, scored
+) -> None:
+    _, ui = artifacts
+    pins = ui["reporting"]["pins"]
+    assert len(pins) == len(scored.reporting.pins)
+    for shown, (pin, result) in zip(pins, scored.reporting.pins):
+        assert shown["pin_id"] == pin.pin_id
+        assert shown["result"]["metric_id"] == result.metric_id
+        assert [D(str(p["value"])) for p in shown["result"]["points"]] == [
+            point.value for point in result.points
+        ]
+
+
+def test_a_refused_question_reaches_the_browser_with_no_result(artifacts) -> None:
+    """The refusal is shown, not hidden, and nothing plausible is shown beside it."""
+    _, ui = artifacts
+    declined = [q for q in ui["reporting"]["questions"] if q["outcome"] != "mapped"]
+    assert declined
+    for question in declined:
+        assert question["result"] is None
+        assert question["metric_id"] is None
+        assert question["refusal"] or question["clarifying_question"]
+
+
+def test_the_take_rate_chart_is_a_percentage_and_not_rupees(artifacts) -> None:
+    """Checkpoint 4 Part B item 4. An absolute fee line rises because batches grow."""
+    _, ui = artifacts
+    for key in ("takeRateByBatch", "takeRateByChannel", "commissionShareByChannel"):
+        assert ui["reporting"][key]["unit"] == "pct", key
+        assert ui["reporting"][key]["total"] is None, key
+
+
+def test_the_browsers_headline_totals_agree_with_the_terminals(artifacts) -> None:
+    """One run, one set of numbers. The dashboard cannot quote a different figure."""
+    score_json, ui = artifacts
+    scored, shown = score_json["totals"], ui["totals"]
+    for key in (
+        "records_processed", "settlement_rows", "open_exceptions", "claims_opened",
+        "claims_recovered", "claims_expired", "claims_open", "registered_metrics",
+        "questions_asked", "questions_mapped", "questions_declined", "pinned_metrics",
+    ):
+        assert shown[key] == scored[key], key
+    for key in ("rupees_recovered", "rupees_expired", "claim_recovery_rate_pct"):
+        assert D(str(shown[key])) == D(scored[key]), key
+
+
+def test_every_registered_metric_is_precomputed_for_the_browser(artifacts) -> None:
+    """The ask surface renders a lookup, because the registry is Python and Decimal.
+
+    A metric the operator can pick but the browser cannot render would be a dead button,
+    so every id at every grouping it supports has to be in the payload.
+    """
+    from pipeline.metrics.registry import REGISTRY
+
+    results = artifacts[1]["reporting"]["results"]
+    expected = {
+        f"{metric.metric_id}|{grouping}"
+        for metric in REGISTRY.values()
+        for grouping in metric.groupings
+    }
+    assert set(results) == expected
+    for key, result in results.items():
+        metric_id, grouping = key.split("|")
+        assert result["metric_id"] == metric_id and result["group_by"] == grouping
+        assert result["points"], f"{key} precomputed to nothing"
+
+
+def test_a_precomputed_result_matches_a_fresh_computation(artifacts, scored) -> None:
+    """The lookup the browser renders is the same number the registry produces."""
+    from pipeline.metrics.registry import MetricParams, compute
+
+    results = artifacts[1]["reporting"]["results"]
+    for key, shown in results.items():
+        metric_id, grouping = key.split("|")
+        fresh = compute(metric_id, scored.reporting.corpus, MetricParams(group_by=grouping))
+        assert [D(str(p["value"])) for p in shown["points"]] == [
+            point.value for point in fresh.points
+        ], key
+
+
+def test_every_logged_question_carries_what_the_ask_screen_needs(artifacts) -> None:
+    """The conversation renders from these fields; a missing one is a blank bubble."""
+    for entry in artifacts[1]["reporting"]["questions"]:
+        assert entry["question"] and entry["restatement"]
+        assert entry["outcome"] in {"mapped", "clarify", "refuse"}
+        if entry["outcome"] == "mapped":
+            assert entry["metric_id"] and entry["params"]["group_by"]
+        elif entry["outcome"] == "clarify":
+            assert entry["clarifying_question"]
+        else:
+            assert entry["refusal"]

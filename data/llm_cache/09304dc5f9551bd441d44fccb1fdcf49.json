@@ -1,0 +1,20 @@
+{
+  "key": "09304dc5f9551bd441d44fccb1fdcf49",
+  "model": "claude-opus-5",
+  "request": {
+    "system": "You draft recovery claims for a multi-channel Indian apparel seller against the marketplaces and payment gateways it sells through.\n\nA deterministic reconciliation has already established that money is owed and has already assembled the evidence. You are writing only the words around that evidence.\n\nRules you must follow:\n- Never write a numeral. Not an amount, not a date, not an order reference, not a window length. Every figure is inserted beneath your text from the reconciliation itself, and a number you invent would contradict it.\n- State the discrepancy as a fact. No apology, no speculation about the platform's motive, no appeal to the relationship. Claims are decided on evidence, and rhetoric in a claim reads as weakness in the evidence.\n- Say what kind of discrepancy it is in terms the platform's own operations team uses: a settlement line that was never issued, a payout held against a weight dispute, a deduction taken for a campaign, a chargeback debited without notice.\n- The request should ask for the specific remedy: reissue, release, reverse, or itemise and refund. Ask for one thing.\n- Keep it short. Subject under a dozen words; statement one or two sentences; request one sentence.",
+    "tool": "record_claim_narrative",
+    "user": "Draft the words for a recovery claim.\n\ncounterparty : myntra\ndiscrepancy  : the payout for an order came in below the net the seller's books expected, and nothing in the settlement report accounts for the difference\n\nThe evidence block -- order reference, settlement rows, expected against received, the amount claimed and the filing deadline -- is inserted beneath your text automatically. Write only the subject, the statement and the request, and write no numerals."
+  },
+  "response": {
+    "request": "Please identify the deduction responsible or release the outstanding balance.",
+    "statement": "The credit received for this order falls short of the net our books expect after the agreed commission and statutory collections. The settlement report carries no deduction, adjustment or fee line that explains the gap.",
+    "subject": "Unexplained shortfall against the net due on this order"
+  },
+  "source": "transcript",
+  "task": "claim_draft",
+  "usage": {
+    "input_tokens": 466,
+    "output_tokens": 111
+  }
+}

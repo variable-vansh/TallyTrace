@@ -5,7 +5,9 @@ import Sidebar from './components/Sidebar'
 import Dashboard from './screens/Dashboard'
 import ReviewQueue from './screens/ReviewQueue'
 import Transactions from './screens/Transactions'
+import Claims from './screens/Claims'
 import Patterns from './screens/Patterns'
+import Ask from './screens/Ask'
 import Reports from './screens/Reports'
 
 // Everything on screen comes from one scored run: `make score && make ui-data`.
@@ -17,7 +19,9 @@ const SCREENS = {
   dashboard: Dashboard,
   review: ReviewQueue,
   transactions: Transactions,
+  claims: Claims,
   patterns: Patterns,
+  ask: Ask,
   reports: Reports,
 }
 
@@ -30,11 +34,33 @@ function Placeholder({ title, body }) {
   )
 }
 
+// The screen lives in the URL hash so a screen can be linked to — #claims opens the
+// claims queue directly. There is no router and no server; this is one line of state
+// kept in sync with `location.hash`.
+const screenFromHash = () => {
+  // `#claims` and `#ask?q=...` both name a screen; the query half belongs to the screen.
+  const name = window.location.hash.replace('#', '').split('?')[0]
+  return name in SCREENS ? name : 'dashboard'
+}
+
 export default function App() {
-  const [activeScreen, setActiveScreen] = useState('dashboard')
+  const [activeScreen, setActiveScreen] = useState(screenFromHash)
   const [selectedWeek, setSelectedWeek] = useState(0) // 0-indexed
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const onHashChange = () => setActiveScreen(screenFromHash())
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  const navigate = (screen) => {
+    // Assigning the bare screen name drops any query a deep link carried, which is what
+    // should happen: navigating away ends that question.
+    window.location.hash = screen
+    setActiveScreen(screen)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -76,7 +102,7 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden relative z-10">
-        <Sidebar activeScreen={activeScreen} onNavigate={setActiveScreen} />
+        <Sidebar activeScreen={activeScreen} onNavigate={navigate} />
 
         {/* Content Area - Dark margin on right and bottom, rounded corners */}
         <main className="flex-1 flex overflow-hidden pr-6 pb-6 pt-0">

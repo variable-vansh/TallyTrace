@@ -1,0 +1,74 @@
+{
+  "pins": [
+    {
+      "pin_id": "pin_01",
+      "name": "Myntra take rate, week by week",
+      "metric_id": "effective_take_rate",
+      "params": {
+        "from_batch": null,
+        "to_batch": null,
+        "channel": "myntra",
+        "group_by": "batch"
+      },
+      "pinned_by": "priya.n@demostore.in",
+      "pinned_at": "2025-03-16",
+      "source_question": "Is Myntra taking a bigger cut than it used to?"
+    },
+    {
+      "pin_id": "pin_02",
+      "name": "Effective take rate by channel",
+      "metric_id": "effective_take_rate",
+      "params": {
+        "from_batch": null,
+        "to_batch": null,
+        "channel": null,
+        "group_by": "channel"
+      },
+      "pinned_by": "priya.n@demostore.in",
+      "pinned_at": "2025-03-16",
+      "source_question": "What share of gross are the platforms keeping across the board?"
+    },
+    {
+      "pin_id": "pin_03",
+      "name": "Exceptions by cause",
+      "metric_id": "exception_count_by_cause",
+      "params": {
+        "from_batch": null,
+        "to_batch": null,
+        "channel": null,
+        "group_by": "cause"
+      },
+      "pinned_by": "priya.n@demostore.in",
+      "pinned_at": "2025-03-16",
+      "source_question": "Which causes are generating the most exceptions?"
+    },
+    {
+      "pin_id": "pin_04",
+      "name": "Manual review rate",
+      "metric_id": "review_rate_trend",
+      "params": {
+        "from_batch": null,
+        "to_batch": null,
+        "channel": null,
+        "group_by": "batch"
+      },
+      "pinned_by": "priya.n@demostore.in",
+      "pinned_at": "2025-03-16",
+      "source_question": "Is the manual review rate actually coming down?"
+    },
+    {
+      "pin_id": "pin_05",
+      "name": "Open claim value",
+      "metric_id": "open_claim_value",
+      "params": {
+        "from_batch": null,
+        "to_batch": null,
+        "channel": null,
+        "group_by": "platform"
+      },
+      "pinned_by": "priya.n@demostore.in",
+      "pinned_at": "2025-03-16",
+      "source_question": "How much money are we still chasing, by platform?"
+    }
+  ]
+}

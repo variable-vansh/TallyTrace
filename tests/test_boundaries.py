@@ -1,9 +1,10 @@
 """Boundaries that are graded criteria, enforced in code rather than in the README.
 
-Three of them. The pipeline must never read the answer key, LLM calls must live only
-in ``pipeline/llm/``, and matching must never become probabilistic. All three are
-easy to state in a README and easy to break in a repo, which is why they are
-asserted here rather than when they are first at risk.
+Five of them. The pipeline must never read the answer key, LLM calls must live only
+in ``pipeline/llm/``, matching must never become probabilistic, the metric registry
+must never construct a model, and the claims register must never call one either.
+Every one is easy to state in a README and easy to break in a repo, which is why they
+are asserted here rather than when they are first at risk.
 """
 
 from __future__ import annotations
@@ -16,6 +17,13 @@ from pipeline.config import REPO_ROOT
 SOURCE_DIRS = ["pipeline", "generator", "harness", "tools", "tests"]
 TRUTH_REFERENCE = re.compile(r"""data[/\\]truth|["']truth["']|DEFAULT_TRUTH""")
 LLM_IMPORT = re.compile(r"^\s*(?:from|import)\s+anthropic\b", re.MULTILINE)
+#: Constructing or calling the model, as opposed to naming one of its output schemas.
+#: ``pipeline.llm.schemas`` is a pydantic module with no transport in it, so importing
+#: a type from it is not a model call and is deliberately not matched here.
+CLIENT_IMPORT = re.compile(
+    r"^\s*(?:from|import)\s+pipeline\.llm\.(client|hypotheses|induction|drafts|intent)\b",
+    re.MULTILINE,
+)
 FUZZY_IMPORT = re.compile(
     r"^\s*(?:from|import)\s+(recordlinkage|fuzzywuzzy|rapidfuzz|thefuzz|difflib|jellyfish)\b",
     re.MULTILINE,
@@ -111,3 +119,58 @@ def test_the_answer_key_is_read_in_exactly_one_module() -> None:
         if TRUTH_REFERENCE.search(path.read_text(encoding="utf-8"))
     )
     assert readers == ["truth.py"], f"the answer key is read in: {readers}"
+
+
+def test_the_metric_registry_never_constructs_a_model() -> None:
+    """The registry computes; the model only selects. Asserted, because it is the claim.
+
+    Every metric is a pure function over ``pipeline.metrics.corpus.Corpus``, which is
+    what makes a pinned metric recompute every batch with nothing in the loop. A module
+    under ``pipeline/metrics/`` that could build a client would make that a promise
+    rather than a property. ``ask.py`` names ``MetricIntent`` -- a pydantic type with no
+    transport behind it -- and that is not a model call.
+    """
+    offenders = [
+        f"{path.relative_to(REPO_ROOT)}"
+        for path in python_files("pipeline/metrics")
+        if CLIENT_IMPORT.search(path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == [], f"the metric registry can reach the model at: {offenders}"
+
+
+def test_the_claims_register_never_calls_a_model_itself() -> None:
+    """Drafting is injected as a callable, so the register does no I/O and asks nothing.
+
+    The deadline clock, the routing and the recovery match are arithmetic over config,
+    and they have to keep working when the model is unavailable. Passing the drafter in
+    is what makes that structural instead of incidental.
+    """
+    offenders = [
+        f"{path.relative_to(REPO_ROOT)}"
+        for path in python_files("pipeline/claims")
+        if CLIENT_IMPORT.search(path.read_text(encoding="utf-8"))
+        and path.name != "cli.py"
+    ]
+    assert offenders == [], f"the claims register can reach the model at: {offenders}"
+
+
+def test_no_sql_is_generated_anywhere() -> None:
+    """The registry exists so that nothing has to write a query. Nothing does.
+
+    Enterprise text-to-SQL execution accuracy runs roughly 21-39% on realistic schemas
+    and its failures are silent, so "we do not generate SQL" is a design claim worth
+    more than a paragraph. There is no database in this repo and no query builder;
+    this fails if either arrives.
+    """
+    sql = re.compile(
+        r"^\s*(?:from|import)\s+(sqlite3|sqlalchemy|psycopg2?|pymysql|duckdb)\b",
+        re.MULTILINE,
+    )
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in python_files(*SOURCE_DIRS)
+        if sql.search(path.read_text(encoding="utf-8"))
+        and path.name != "test_boundaries.py"
+    ]
+    assert offenders == [], f"a SQL engine is imported at: {offenders}"
+

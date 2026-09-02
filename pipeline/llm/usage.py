@@ -1,14 +1,15 @@
 """LLM token accounting.
 
-There is no LLM in this build yet. This ledger exists anyway, because the harness
-reports rupee cost per reconciled transaction and that number has to have somewhere
-to come from the moment checkpoint 3 makes its first call. Adding the plumbing
-afterwards means changing the harness, the report, the JSON artifact and the chart
-at the same time as adding the model -- and then having no idea which of the two
-changes moved the number.
+Written before the first model call existed, because the harness reports rupee cost
+per reconciled transaction and that number needed somewhere to come from. Adding the
+plumbing afterwards would have meant changing the harness, the report, the JSON
+artifact and the chart at the same moment as adding the model -- and then having no
+idea which of the two changes moved the number.
 
-Today every batch reports zero. Checkpoint 3's client calls :meth:`record` after
-each response with ``response.usage``; nothing else about the harness changes.
+The client calls :meth:`record` after each response with ``response.usage``, and the
+four LLM jobs all bill through it: hypotheses and inductions to the batch they were
+asked in, claim narratives to the batch the claim opened in, intent mappings to the
+last batch.
 
 Lives under ``pipeline/llm/`` because that is where anything LLM-shaped belongs,
 even a dataclass. It imports no client -- the boundary test greps for that.

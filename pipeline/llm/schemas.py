@@ -1,6 +1,7 @@
-"""The two structured outputs the model is allowed to produce.
+"""The structured outputs the model is allowed to produce.
 
-Both are pydantic models and both are handed to the API as a JSON schema with the
+Four of them, one per LLM job: a hypothesis, an induced rule, a claim narrative and a
+question-to-metric mapping. Every one is a pydantic model handed to the API as a JSON schema with the
 frozen enum inlined, so ``cause`` is constrained *in the schema* rather than merely
 requested in the prompt text. A cause outside the enum is a hard error at parse time
 -- there is no fallback, no nearest-match, no "unknown" bucket. A reconciliation
@@ -12,14 +13,20 @@ rule's clothes, and it would score beautifully on the batch it came from and exp
 nothing. It is rejected here by construction -- the schema has no field to put one in
 -- and rejected again in ``pipeline/rules/models.py`` against the values, because a
 field named ``description`` will happily hold ``ord_000019`` if nobody looks.
+
+The claim narrative carries the negative constraint that matters most on its side of
+the system: **no numerals at all.** Every rupee figure in a claim letter is
+substituted by code from the matcher's verdicts, and the schema is what makes that
+checkable rather than aspirational.
 """
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipeline.models import Cause, Channel, ResolutionClass
 
@@ -150,3 +157,139 @@ def json_schema(model: type[BaseModel]) -> dict[str, Any]:
 
     resolved: dict[str, Any] = resolve(schema)
     return resolved
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 -- claim drafting
+# --------------------------------------------------------------------------- #
+
+#: Any digit at all. See :class:`ClaimNarrative`.
+DIGIT = re.compile(r"\d")
+
+
+class ClaimNarrative(_Strict):
+    """LLM job 4: the words of a claim, and only the words.
+
+    A claim is decided on the quality of its evidence, not on the quality of its
+    prose, so the model's contribution here is deliberately small: a subject line, a
+    factual statement of what kind of discrepancy this is, and the request. The
+    evidence block underneath -- order id, settlement rows, expected against
+    received, the shortfall, the filing deadline -- is rendered by
+    ``pipeline/claims/drafting.py`` straight from the matcher's verdicts.
+
+    **The model may not write a number.** Every field here rejects digits outright.
+    That is not stylistic: a figure a language model typed into a letter to Amazon is
+    a figure nobody computed, and one wrong rupee in a claim is the whole claim. The
+    constraint makes "every number in the draft came from the matcher" a property of
+    the schema rather than a promise in a README, and ``tests/test_claims.py``
+    asserts it against the drafts an actual run produced.
+    """
+
+    subject: str = Field(min_length=10, max_length=90)
+    statement: str = Field(
+        min_length=30, max_length=420,
+        description="One or two sentences stating factually what the discrepancy is. "
+                    "No rhetoric, no apology, no numerals of any kind.",
+    )
+    request: str = Field(
+        min_length=15, max_length=260,
+        description="What is being asked for, in one sentence. No numerals of any kind.",
+    )
+
+    @field_validator("subject", "statement", "request")
+    @classmethod
+    def _no_numerals(cls, value: str) -> str:
+        found = DIGIT.search(value)
+        if found:
+            raise ValueError(
+                f"a claim narrative may not contain a numeral (found {found.group(0)!r}); "
+                "every figure in a draft is substituted from the matcher's verdicts"
+            )
+        return value
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint 4 -- intent mapping
+# --------------------------------------------------------------------------- #
+
+#: The registered metric ids, mirrored here the way :class:`~pipeline.models.Cause`
+#: mirrors ``config/causes.yaml``. Written out rather than derived so that the schema
+#: handed to the API is a literal object anyone can read, and ``tests/test_metrics.py``
+#: asserts this tuple and ``pipeline.metrics.registry.REGISTRY`` agree. A model asked
+#: for a metric can therefore only return one that exists -- not because the prompt
+#: asked nicely, but because the schema has no other value to give.
+MetricId = Literal[
+    "net_revenue_by_channel",
+    "gross_order_value",
+    "effective_take_rate",
+    "commission_share_of_gross",
+    "exception_count_by_cause",
+    "review_rate_trend",
+    "auto_resolved_rows",
+    "claim_recovery_rate",
+    "open_claim_value",
+    "rupees_expired_unrecovered",
+]
+
+#: How a result may be grouped. Each metric declares which of these it supports and
+#: rejects the rest -- see ``pipeline.metrics.registry.Metric.run``.
+Grouping = Literal["channel", "batch", "cause", "platform"]
+
+#: What the mapping decided. Three outcomes, and two of them are not an answer.
+IntentOutcome = Literal["mapped", "clarify", "refuse"]
+
+
+class MetricIntent(_Strict):
+    """LLM job 3: a plain-language question, mapped onto a registered metric.
+
+    The model selects; it never computes and it never writes SQL. Enterprise
+    text-to-SQL execution accuracy runs roughly 21-39% on realistic schemas, and the
+    failures are not visible ones -- a plausible query returns a plausible number that
+    happens to be wrong. Selecting from a closed registry has a different failure
+    mode: it can only pick the wrong metric from a list of ten, and the restatement
+    below puts that choice in front of a human before anything is computed.
+
+    Three outcomes and only one of them is an answer:
+
+    - ``mapped``  -- a registered metric answers this. ``metric_id`` is set.
+    - ``clarify`` -- more than one metric could be meant. One question is asked, and
+      nothing is computed until it is answered. Guessing here is how a dashboard
+      quietly answers a question nobody asked.
+    - ``refuse``  -- nothing in the registry answers this. The refusal says so
+      plainly. It does not offer a plausible adjacent chart, which is the tempting
+      failure and the dishonest one.
+    """
+
+    outcome: IntentOutcome
+    metric_id: MetricId | None = None
+    group_by: Grouping | None = None
+    channel: Channel | None = None
+    from_batch: int | None = Field(default=None, ge=1)
+    to_batch: int | None = Field(default=None, ge=1)
+    restatement: str = Field(
+        min_length=15, max_length=240,
+        description="What is about to be computed, in one sentence, for a human to confirm "
+                    "before anything runs. Required on every outcome.",
+    )
+    clarifying_question: str | None = Field(default=None, max_length=200)
+    refusal: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def _outcome_carries_its_payload(self) -> "MetricIntent":
+        """An outcome without the field it exists for is a half-answer. Reject it here.
+
+        Cheaper than discovering it downstream: a ``mapped`` with no metric id would
+        otherwise surface as a ``KeyError`` in the registry three calls away from the
+        thing that produced it.
+        """
+        required = {
+            "mapped": ("metric_id", self.metric_id),
+            "clarify": ("clarifying_question", self.clarifying_question),
+            "refuse": ("refusal", self.refusal),
+        }[self.outcome]
+        if not required[1]:
+            raise ValueError(f"outcome {self.outcome!r} requires {required[0]}")
+        if self.outcome != "mapped" and self.metric_id is not None:
+            raise ValueError(f"outcome {self.outcome!r} must not name a metric")
+        return self
+

@@ -3,7 +3,7 @@ PIP := .venv/bin/pip
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv generate verify-clean reconcile learn llm-fixtures resolutions ui-data demo score test typecheck check clean
+.PHONY: help venv generate verify-clean reconcile learn claims reporting ask llm-fixtures resolutions ui-data demo score test typecheck check clean
 
 help:  ## Show the available targets
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -25,19 +25,31 @@ reconcile:  ## Run the deterministic matcher across all ten batches
 learn:  ## Run the learning loop across the ten batches; writes data/rules.json + data/learning.json
 	$(PY) -m pipeline.learn
 
+claims:  ## Show the claims queue at the end of the corpus, sorted by expiry
+	$(PY) -m pipeline.claims.cli --offline
+
+ask:  ## Ask the metric registry a question:  make ask q="how much are we still chasing?"
+	$(PY) -m tools.ask --offline --yes "$(q)"
+
 resolutions:  ## Rebuild the operator work log from tools/operator_notes.py
 	$(PY) -m tools.write_resolutions
+
+reporting:  ## Rebuild data/questions.json + data/pins.json from tools/operator_questions.py
+	$(PY) -m tools.write_reporting --offline
 
 llm-fixtures:  ## Populate data/llm_cache. With ANTHROPIC_API_KEY set this calls the API.
 	$(PY) -m tools.write_llm_fixtures
 
 ui-data:  ## Build the JSON the React UI reads
-	$(PY) -m tools.build_ui_data
+	$(PY) -m tools.build_ui_data --offline
 
 score:  ## Score the pipeline against the answer key; writes EXCEPTIONS.md + data/score.json
-	$(PY) -m harness.score
+	$(PY) -m harness.score --offline
 
-demo: generate score ui-data  ## Everything, end to end. Run it twice: the numbers do not move.
+demo: generate score ui-data  ## Everything, end to end, offline. Run it twice: the numbers do not move.
+
+reproduce:  ## Prove it: run `make demo` twice from scratch and diff the artifacts
+	$(PY) -m tools.reproduce
 
 test:  ## Run the test suite
 	$(PY) -m pytest tests/ -q

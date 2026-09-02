@@ -1,10 +1,14 @@
-import { LayoutDashboard, ListChecks, ArrowLeftRight, Brain, FileBarChart } from 'lucide-react'
+import {
+  LayoutDashboard, ListChecks, ArrowLeftRight, Brain, FileBarChart, Gavel, MessageSquareText,
+} from 'lucide-react'
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'review', label: 'Review Queue', icon: ListChecks },
   { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
+  { id: 'claims', label: 'Claims', icon: Gavel },
   { id: 'patterns', label: 'Rules', icon: Brain },
+  { id: 'ask', label: 'Ask', icon: MessageSquareText },
   { id: 'reports', label: 'Reports', icon: FileBarChart },
 ]
 

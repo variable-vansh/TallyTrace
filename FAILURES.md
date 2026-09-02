@@ -696,6 +696,63 @@ Also added `tests/test_ui_data.py`, which asserts the browser and the terminal a
 quoting the same run, and that `data/score.json` contains no float outside the labelled
 `timings` block.
 
+### 38. Four defects a review pass found, three of them only visible on screen
+
+I had shipped checkpoint 4 with tests green, mypy clean and `make reproduce` identical,
+and had never once looked at the UI in a browser. Driving headless Chrome at it found
+three things no test was ever going to catch, and one that a test should have.
+
+**Every chart rendered with no line and no bars.** Recharts animates marks in on mount,
+and the animation never completes under a headless capture — axes, gridlines and dots
+drew, the paths did not. In a live browser it is fine, so this was invisible from the
+terminal and would have been invisible right up until the screen recording. Every chart
+in the app now sets `isAnimationActive={false}`: an entrance animation on a
+reconciliation dashboard buys nothing and costs a flash of empty axes on every tab
+switch.
+
+**The claim recovery rate reported website at 0.00%.** Six website chargebacks are open
+and not one has settled either way, so the denominator is zero — and `_pct` returns zero
+for zero over zero, which is right for a count and wrong for a rate. A bar reading "0%
+recovery on website" states a failure where there is only an unfinished filing window.
+Platforms with nothing settled are now omitted rather than plotted, which is what a bar
+chart's version of "undefined" looks like.
+
+**Three screens showed corpus-wide numbers under a week selector.** The claims register,
+the take-rate charts and the dashboard's claims panel are all whole-corpus, and the page
+headers said "Week 1 · 2025-01-06 → 2025-01-12" above them. Nothing was wrong with the
+numbers and everything was wrong with the label. Each card now says which it is, and the
+claims screen says why it does not follow the selector: a filing window does not reset
+because you are looking at an earlier week.
+
+**A windowed series could report a batch outside its own window.**
+`rupees_expired_unrecovered` seeds its buckets from the requested window but was
+accumulating by the *expiry* transition's batch, and a claim opened in the window can
+expire outside it. Nobody hit it because the shipped views ask for the whole corpus. Now
+guarded, with a test that asks for batches one to five and asserts it gets five bars.
+
+### 39. The ask surface was a log of questions, not a place to ask one
+
+The reporting surface shipped as a static list: here are eleven questions somebody
+asked, here is what the system said. Every claim in the README was true of it and it
+demonstrated none of them, because the thing worth showing — the restatement appearing
+*before* anything is computed, and a human accepting it — is a sequence, and a table
+cannot show a sequence.
+
+It is now a conversation on its own screen, with the pinned board beside it. You type,
+it restates and stops, you accept, the chart appears, a button pins it. The clarification
+turn hands you the registry to answer with, which is a better answer than I originally
+had: the model asked the question and the registry is the vocabulary the answer has to
+come from, so no second model call happens.
+
+Two things had to be built to make it honest rather than a mock. The browser cannot run
+the registry — the metrics are `Decimal` arithmetic in Python — so every metric at every
+grouping it supports is precomputed into the UI payload and the screen renders a lookup.
+That is not a shortcut around the design; a metric is a pure function of the corpus, so
+its value is settled the moment the batch is scored. And a question outside the committed
+fixtures returns "I have not been asked this one" rather than anything resembling an
+answer, because the alternative is a chat box that appears to understand English and
+does not.
+
 ### Checkpoint gate — done conditions, answered
 
 | condition | result |
@@ -709,3 +766,168 @@ quoting the same run, and that `data/score.json` contains no float outside the l
 | Provenance chain complete for every auto-resolution | **Yes.** Rule, state at fire, source resolution, operator, proposed cause, and all three guardrail evaluations on all 146. The decision-path view renders the record verbatim. |
 | LLM calls confined to `pipeline/llm/`, cached, deterministic on rerun | **Yes.** `anthropic` is imported in exactly one file; `pipeline/rules/` cannot reach a client at all; `score.json` is byte-identical across runs apart from the labelled `timings` block. |
 | Batch proposal cards and rules page plugged into the existing UI | **Yes.** Both in the existing shell, plus the decision path on every exception and every flagged transaction row. |
+
+---
+
+## Checkpoint 4 — Claims, Reports, Packaging
+
+### 30. The effective take rate climbed from 5% to 86% and none of it was real
+
+**What happened.** The first version of `pipeline/metrics/corpus.py` took gross order
+value from the batch's `internal_ledger.csv` and every deduction from the batch's
+`settlement_report.csv`. The resulting take rate per batch read
+`5.27, 12.13, 16.71, 16.01, 15.44, 16.17, 20.07, 23.59, 40.10, 86.53`.
+
+**Why it mattered.** It looked, at a glance, exactly like the signal the chart exists to
+catch — a take rate climbing week over week is what a silent commission change looks
+like from the outside — and I nearly wrote a paragraph about it. It is an artifact. A
+batch *is* a settlement report: its ledger file holds the orders booked that week and its
+settlement rows hold the orders paid that week, and those are different sets. Batch 10
+absorbs every late settlement in the corpus and books almost nothing, so the numerator
+was near its maximum over a denominator near its minimum. Numerator and denominator were
+drawn from different populations, which means the quotient was not a rate.
+
+**Fix.** Gross order value is now looked up per *settling* order, from an index built
+across every batch's ledger, and deduplicated — an order that emits a payment and a
+refund in the same batch contributes its value once. The series is now
+`18.03, 15.98, 19.61, 19.04, 17.24, 16.81, 18.98, 17.72, 16.69, 15.61`, which is a flat
+line, which is the truth about this corpus. `test_the_take_rate_denominator_is_the_orders_the_rows_settle`
+asserts every batch stays inside 5–40% so the old shape cannot come back quietly.
+
+The near-miss is the point of the entry. A wrong chart that looks boring gets checked. A
+wrong chart that looks like the finding you were hoping for does not.
+
+### 31. The claims queue opened a claim on the credit that closed a claim
+
+**What happened.** Routing sent every case whose cause carries `counterparty_claim` to
+the register. The reimbursement rows the generator plants — the ones checkpoint 1 put in
+specifically so that checkpoint 4's auto-close would have something to close — surface as
+`late_row_for_already_settled_order` and get hypothesised as `short_payment_unexplained`,
+because from the row alone that is what money moving against a closed order looks like.
+So `ord_000081`'s reimbursement in batch 4 opened a second claim for the same ₹287.97 the
+batch-2 claim was already chasing.
+
+**Why it mattered.** Double-counted rupees in the queue header, and a claim drafted
+against Flipkart asking them to pay money they had just paid.
+
+**Fix.** A case whose direction is `over` never opens a claim: money arriving is not a
+debt. The first version of the filter was `direction == "short"`, which was worse — it
+silently dropped every `missing_settlement_row` claim, because an order that never
+settled has no delta to take a direction from and comes through as `flat`. The filter is
+`direction != "over"` and both halves are tested.
+
+### 32. Matching recoveries on the description would have scored perfectly and meant nothing
+
+**What happened.** The planted reimbursement rows carry
+`description = "CLAIM REIMBURSEMENT ord_000081"`. Matching on that string is one line of
+code and closes five of five planted pairs.
+
+**Why it mattered.** It is not a reconciliation, it is a detector for one generator's
+phrasing. No platform writes that string, and the number it produces would be a
+measurement of the test fixture.
+
+**Fix.** Recovery is an exact key plus an explicit tolerance band, the same as every other
+match in this repo: same `order_id`, money in, amount within `rounding_tolerance_inr` of
+the amount claimed. It closes three of the five planted pairs rather than five, and the
+harness reports the other two as misses with the reason — in both, the reimbursement
+arrived while the order was still inside its settlement window, so the matcher never
+raised it and no claim was ever opened to close. A claim the system had no cause to open
+is not a claim it failed to recover, and it is still reported as a miss, because
+excluding it would be marking its own homework.
+
+### 33. The claims register scored TCS discrepancies as 100% wrong for being exactly right
+
+**What happened.** `harness/claims.py` scored every opened claim by asking whether the
+answer key's cause for its rows was a `counterparty_claim`. TCS timing mismatches are in
+the register for their GSTR-8 cutoff and nothing else — they are `tax_review`, they are
+never drafted and never auto-closed — so both of them scored as false claims and the
+attribution table showed `tcs_timing_mismatch  2  0  0.00%`.
+
+**Why it mattered.** A metric that penalises correct behaviour will eventually get
+"fixed" by changing the behaviour.
+
+**Fix.** A claim is scored against the class it was *opened under*: a counterparty claim
+is confirmed when the key agrees somebody else owes the money, and a TCS discrepancy is
+confirmed when the key agrees it is a tax-review item. Both now score 100%.
+
+### 34. Drafting a claim moved it backwards from filed to drafted
+
+**What happened.** `ClaimRegister.advance` ran recover → expire → open → file, and
+drafting was a separate call afterwards. In batches 1–3 the operator works the whole
+queue, so a claim opened and worked in the same week ended the batch as `filed` and was
+then moved to `drafted` by the drafting pass.
+
+**Why it mattered.** The status a human sees would have been a week behind the work they
+had already done, and the transition log — which is the claim's audit trail — recorded a
+state change that never happened.
+
+**Fix.** Drafting moved inside `advance`, between open and file, and the drafter is
+injected as a callable rather than called directly. Two things fell out of that: the
+order is now stated once in the module docstring instead of being implicit across two
+call sites, and `pipeline/claims/` cannot construct a model client at all — asserted by
+`test_the_claims_register_never_calls_a_model_itself`, alongside the same assertion for
+`pipeline/metrics/`.
+
+### 35. The test that proves the model wrote no numbers was itself unable to prove it
+
+**What happened.** `ClaimNarrative` forbids the model a numeral, so every figure in a
+finished draft must have been substituted from the matcher's verdicts. The first version
+of the test built a set of "allowed" strings out of the claim's own fields and asserted
+each numeral-bearing line contained one. It failed on
+`Net received                      ₹0.00` — a figure that is entirely legitimate and
+comes straight from the verdict detail of a fully withheld payout.
+
+**Why it mattered.** The test was checking a proxy for the property rather than the
+property. It would have passed a draft containing an invented figure on a line that also
+happened to mention the claim id.
+
+**Fix.** The test now rebuilds the draft's context the way the renderer does — from the
+case's merged verdict detail — and asserts every *numeric token* in the whole draft
+appears in it. Two follow-ons: the token regex first swallowed the comma in
+`st_000868, st_000824` and had to be tightened to Indian-grouping shape, and the check
+now covers the subject and the signature block rather than only the evidence table.
+
+### 36. A docstring broke the answer-key boundary test
+
+**What happened.** `harness/claims.py` explains where the planted recovery pairs come
+from, and the sentence named `data/truth/manifest.json`.
+`test_the_answer_key_is_read_in_exactly_one_module` greps for the path rather than for an
+import and failed: `the answer key is read in: ['claims.py', 'truth.py']`.
+
+**Why it mattered.** It is a false positive — the module receives an already-loaded
+`AnswerKey` and opens nothing — but the test is right to be blunt. A grep that exempted
+comments would have to decide what a comment is, and the boundary is worth more than the
+convenience of naming a path in prose.
+
+**Fix.** Reworded the docstring to say "the answer key's manifest" and to state which
+module does own the path. The test stayed as it was.
+
+### 37. Two things the checkpoint-4 audit found that the tests were happy with
+
+**A claim could in principle be opened and closed in the same batch.** Ordering inside
+`advance` prevents it — recovery runs before opening — but nothing said so. If the order
+were ever changed, a claim raised on Monday could be marked recovered on Monday by the
+very row that raised it, and the recovery rate would climb for no reason. `_recover` now
+filters explicitly on `claim.opened_batch < batch`, and
+`test_a_claim_never_opens_and_closes_in_the_same_batch` asserts it over the shipped run.
+
+**`written_off` is a status nothing in this corpus reaches.** It is in the spec's claim
+schema and it is implemented, and no claim in ten batches gets there, because writing off
+a claim needs an operator action the operator log has no record of. Left in and said
+plainly here rather than deleted, because the alternative — quietly narrowing the status
+set to the ones the demo happens to exercise — is how a schema stops describing the
+domain and starts describing the fixture.
+
+### Checkpoint gate — done conditions, answered
+
+| condition | result |
+|---|---|
+| `make demo` reproducible from a clean clone, offline, identical numbers twice | **Yes.** `make reproduce` runs it twice and diffs four artifacts; all four hashes match. `--offline` refuses the network *with a key present*, so what is proved is that the fixtures and the seed suffice. |
+| Claims auto-close against planted recovery credits | **Partly, and the gap is reported.** 3 of 5 planted pairs auto-close. In the other two the reimbursement arrived before the settlement window elapsed, so no claim was ever opened; both are listed as misses in the recovery table rather than excluded. Failure #32. |
+| Claims queue sorted by expiry with the summary header | **Yes.** `₹35,252.95 open across 20 claims · 3 expiring in 9 days`, sorted by deadline with unclocked claims last. Same view in `make claims`, in EXCEPTIONS.md and in the UI. |
+| Pinned metrics recompute with no LLM call | **Yes**, and asserted rather than asserted-in-prose: `tests/test_pins.py` monkeypatches `LlmClient.__init__`, `LlmClient.ask`, `client_from` and `ResponseCache.get` to raise, then recomputes all five pins. |
+| Registry refuses unmappable questions instead of guessing | **Yes.** 8 of 11 logged questions map, 1 clarifies, 2 refuse. The schema rejects an outcome that refuses and names a metric at the same time, so a refusal cannot carry a chart. |
+| Every number in the README traced to a run | **Yes**, and enforced: `tests/test_readme.py` checks the opening claim, the headline table, the benchmark row, the review-series endpoints and the ₹34-lakh gap against `data/score.json` and the metric registry. It also fails if the stated test count is wrong. |
+| `EXCEPTIONS.md` and `FAILURES.md` real and non-empty | **Yes.** EXCEPTIONS.md is 666 itemised findings plus the open and expired claim registers; FAILURES.md is 39 entries kept since checkpoint 1, none reconstructed. |
+| Architecture diagram organised on the AI boundary | **Yes.** Four shaded nodes, everything else labelled "deterministic by choice", mermaid plus an ASCII fallback. The mermaid source was parsed with mermaid 11 before committing rather than eyeballed. |
+| Video recorded, ending on the unresolved exception | **No.** `VIDEO.md` holds the shot list and the script with every figure sourced to a command, and beat 7 ends on the expired-claims table and a bank credit nobody can explain. The recording has not happened and the README says so under Limitations. |
