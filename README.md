@@ -1362,10 +1362,13 @@ outcomes, and two of them are answers:
 | `clarify` | two readings would give materially different numbers. One question, nothing computed |
 | `refuse` | the reconciliation genuinely does not hold the facts the question needs |
 
-A plan is drawn from a closed vocabulary: seven measures (`gross`, `net`, `fees`,
-`taxes`, `deductions`, `orders`, `settlement_rows`), three optional denominators (per
-order, per settlement row, as a percentage of gross), a grouping, and channel and week
-filters. **There is no query, no generated expression and nothing evaluated.** The
+A plan is drawn from a closed vocabulary over **three fact tables** — the money
+(gross, net, fees, taxes, deductions, orders, settlement rows, by channel and week), the
+**exceptions** (count and rupee impact, by channel, week, cause, reason, bucket, status,
+outcome and rule), and the **claims** (count, amount claimed, amount recovered, by
+platform, status, cause and week). A plan names one source, one of its measures, an
+optional second measure to divide by, one dimension to group on, filters, a week range
+and a sort. **There is no query, no generated expression and nothing evaluated.** The
 failure mode is "picked the wrong measure", which the restatement puts in front of a
 person before it runs — not "returned a plausible wrong number", which is what generated
 SQL does. `validatePlan` runs server-side *and* in the browser, from the same module, so
@@ -1377,9 +1380,11 @@ screen it would read as an answer.
 
 ### What a plan computes over
 
-`ui/public/tallytrace.json` carries a **`facts` cube**: fifty rows, one per batch per
-channel, holding gross order value, net settled, fees, taxes, distinct orders and
-settlement rows. It is emitted from `BatchFacts` — the same aggregate
+The exception and claim tables are read straight off the payload the screens already
+render, so an answer about them cannot drift from what the rest of the UI shows. The
+money table is a **`facts` cube** carried in `ui/public/tallytrace.json`: fifty rows,
+one per batch per channel, holding gross order value, net settled, fees, taxes, distinct
+orders and settlement rows. It is emitted from `BatchFacts` — the same aggregate
 `pipeline/metrics/registry.py` reads — so a figure derived from it cannot disagree with
 one the registry printed. `tests/test_ui_data.py` asserts exactly that, to the paisa,
 including the take rate, because a ratio is the shape where summing the wrong way
@@ -1391,10 +1396,26 @@ appear 2,625 times, because the matcher reads the ledger cumulatively — so any
 summing those rows would overstate the books by two and a half times. The
 deduplication has already happened, once, in Python.
 
-**Refusal did not go away; it got honest.** It now means *the books do not hold this
+**A read answer is not a computed one.** When a question is not an aggregation — an
+operator's note, a claim letter, something needing two sources at once — the model picks
+a source and filters, at most 200 rows are selected through the same validated
+vocabulary, and it answers from those. That is a weaker guarantee than a computed figure
+and the screen says so: the badge reads *read from rows*, and the footnote names how many
+rows it read. It is the fallback rather than the default, because a number that has to be
+exact should be a metric.
+
+**The sentence above every chart is derived, not written.** A chart is not an answer —
+"which channel had the fewest exceptions" wants the words *offline, at 1*. That sentence
+is composed from the computed result, and every figure in it is substituted rather than
+re-typed by a model. The obvious build is to hand the table back and ask for a summary,
+which is how a correct computation acquires a wrong sentence: nobody re-checks prose. It
+is the same rule the claim drafter follows, where the schema forbids the model a numeral.
+
+**Refusal did not go away; it got honest.** It now means *the run does not hold this
 fact*, rather than *no metric was registered for it*. "Which SKUs are least profitable"
 still refuses — there is no product master and no cost of goods. "Highest average order
-value by channel" now answers, because orders and their values are right there.
+value by channel" and "which channel has the fewest exceptions" both answer, because
+orders, values, channels and exceptions are all right there.
 
 Fixtures are still tried first, so the eleven logged questions cost nothing and stay
 deterministic. Only an unasked question reaches the model, and the answer is labelled
@@ -1526,7 +1547,3 @@ recovery table anyway, because excluding them would be marking its own homework.
 batches, which is what lets the clean base reconcile at exactly 100%; the cost is that
 batch 1 carries a large opening book and batch 10's ledger is small, so cross-batch causes
 are under-represented at both ends. FAILURES.md #6.
-
-**No video is recorded.** [VIDEO.md](VIDEO.md) holds the shot list and the script with
-every number sourced to a command, so the recording is a mechanical step rather than a
-creative one — but the recording itself has not happened.

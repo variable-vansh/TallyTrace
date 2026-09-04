@@ -5,11 +5,12 @@
 // so a *deployed* page can answer a question that is not already in those fixtures.
 // It is the same contract in a different language and against a different provider:
 //
-//   - the model chooses one id from the frozen registry, or it declines;
-//   - it never computes, never writes a query, and never sees a row of data;
-//   - the schema cannot express a filter, because this deployment only holds
-//     whole-corpus results and a schema that cannot promise one cannot break it;
-//   - the restatement goes in front of a human before anything is looked up.
+//   - the model chooses a registered metric id, or a plan drawn from a closed
+//     vocabulary of sources, measures and dimensions, or it declines;
+//   - it never computes, never writes a query, and never sees a row of data —
+//     `../src/lib/compute.js` does the arithmetic, and the same module's validator
+//     runs here, so what is legal and what is executed cannot disagree;
+//   - the restatement goes in front of a human before anything runs.
 //
 // The key is read from the environment and never leaves this function. Anything
 // prefixed VITE_ is compiled into the browser bundle, so the key must not be.
@@ -17,7 +18,9 @@
 // Imported, not mirrored: the plan vocabulary and its validator are the same module the
 // browser evaluates with, so the thing that decides a plan is legal and the thing that
 // runs it cannot disagree.
-import { MEASURES, DENOMINATORS, GROUPINGS as PLAN_GROUPINGS, validatePlan } from '../src/lib/compute.js'
+import {
+  SOURCE_IDS, ALL_DIMS, ALL_MEASURES, BROWSE_CAP, vocabulary, validatePlan,
+} from '../src/lib/compute.js'
 
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 const ENDPOINT = (model) =>
@@ -50,53 +53,92 @@ const REGISTRY = [
 ]
 
 const METRIC_IDS = REGISTRY.map(([id]) => id)
+// Any real measure of the source: `browse` does not aggregate, but the shared validator
+// wants one, and this keeps the two paths on a single validation routine.
+// The second call, and a deliberately different contract from the first.
+//
+// The first call chooses what to compute and never sees a row. This one is handed rows
+// and asked to read them, which is the weaker guarantee — so it is the fallback rather
+// than the default, it is capped, and the UI labels its answers as read rather than
+// computed. What keeps it honest is that the rows are real, they are the same rows the
+// screens render, and they are shown next to the answer.
+const READ_SYSTEM = `You answer a question from a table of rows taken out of a reconciliation of an Indian multi-channel seller's books.
+
+Rules:
+- Answer only from the rows given. They are the complete set matching the filter unless the message says the list was capped.
+- Quote figures exactly as they appear. Do not add up long columns in your head — if the question needs a total across many rows, say that a computed metric would answer it better rather than risking a wrong sum.
+- Money is rupees. A "batch" is one week; there are ten.
+- Be brief: two or three sentences. No preamble, no bullet lists, no restating the question.
+- If the rows do not contain the answer, say exactly what is missing. Do not guess and do not pad.`
+
+const MEASURE_FOR = { money: 'gross', exceptions: 'count', claims: 'count' }
 const GROUPINGS = ['channel', 'batch', 'cause', 'platform']
-const CHANNELS = ['amazon', 'flipkart', 'myntra', 'website', 'offline']
 const GROUPINGS_FOR = Object.fromEntries(REGISTRY.map(([id, , g]) => [id, g]))
 
 // Kept deliberately close to the Python system prompt. The differences are the
 // grouping-versus-filter paragraph and the worked refusal, both of which exist because
 // of how this went wrong the first time — see the notes on each below.
-const SYSTEM = `You map a question about a reconciliation dashboard onto exactly one metric from a fixed registry, or you decline.
+const SYSTEM = `You answer questions about a reconciliation of an Indian multi-channel apparel seller's books — Amazon, Flipkart, Myntra, their own website and a shop counter, over ten weekly batches.
 
-You never compute anything, you never write a query, and you never see the data. You choose an id, and a deterministic function that has already run does the rest.
+You never compute anything, you never write a query, and you never see a row of data. You choose *what* to compute from a closed vocabulary, and a deterministic function does the arithmetic.
 
-Rules you must follow:
-- Choose only from the metric ids in the schema. There is no nearest match and no "closest available" answer.
-- Choose a grouping the metric supports. The catalogue below lists them per metric.
-- restatement is required on every outcome. Write what is about to be shown in one plain sentence, as it will be put to the operator for confirmation before it runs. Name the metric in words and the grouping.
+restatement is required on every outcome: one plain sentence saying what is about to be shown, put to the operator to confirm before anything runs.
 
-Grouping is not filtering, and both are supported:
-- GROUPING by channel, batch, cause or platform is supported wherever the catalogue lists it. "By channel", "per platform", "week by week" and "broken down by cause" are all groupings. Never decline a question for asking to see something broken down.
-- FILTERING to particular channels or a range of weeks is supported on a computed plan (below), through channels, fromBatch and toBatch.
+You have four outcomes. Two of them are answers, and you should try hard to give one.
 
-You have two ways to answer, and you should prefer the first:
+1. outcome "mapped" — a registered metric answers this exactly. These are the figures the run already published and the only ones that can be pinned, so prefer them when one genuinely fits. Set metric_id and group_by from the catalogue below.
 
-1. outcome "mapped" — a registered metric answers the question. These are the figures this run already computed and published; they are the verified ones, and they can be pinned to the dashboard. Set metric_id and group_by.
+2. outcome "computed" — no registered metric fits, but the question is arithmetic over the run. Set plan. This is the general case and it covers most questions; reach for it rather than declining.
 
-2. outcome "computed" — no registered metric fits, but the question is arithmetic over the reconciled books. Set plan, and leave metric_id empty. The plan is executed by a deterministic function; you are choosing what to compute, not how.
+3. outcome "browse" — the data holds the answer but it is not an aggregation: it needs reading rows, or free text like an operator's note or a claim letter, or two sources at once. Set browse to the source and the filters that narrow it, and the rows will be read for you. Filter as tightly as the question allows; at most ${BROWSE_CAP} rows are read.
 
-The plan has these fields, and only these:
-- measure (required): ${Object.keys(MEASURES).join(', ')}
-- per (optional): ${Object.keys(DENOMINATORS).join(', ')}. Leave empty to total the measure. Use "order" for a per-order average, "settlement_row" for a per-row average, and "gross" to express the measure as a percentage of gross order value.
-- groupBy: ${PLAN_GROUPINGS.join(', ')}
-- channels (optional): any of amazon, flipkart, myntra, website, offline. Leave empty for all.
-- fromBatch / toBatch (optional): a week range, 1 to 10. Leave empty for the whole corpus.
+4. outcome "clarify" — two readings would give materially different numbers. Ask exactly one question, and set nothing else.
 
-Worked examples of plans:
-- "highest average order value by channel" -> measure "gross", per "order", groupBy "channel".
-- "how many orders did we settle each week" -> measure "orders", groupBy "batch".
-- "what are Myntra and Amazon keeping as a share of gross" -> measure "deductions", per "gross", groupBy "channel", channels ["myntra","amazon"].
-- "what did we actually bank in the first three weeks" -> measure "net", groupBy "batch", fromBatch 1, toBatch 3.
-- "average tax withheld per order" -> measure "taxes", per "order", groupBy "channel".
+5. outcome "refuse" — the data genuinely does not contain what is being asked about. Set nothing else.
 
-- Use outcome "clarify" when two readings could genuinely be meant and they would give materially different numbers. Ask exactly one question. Do not also pick a metric or a plan.
-- Use outcome "refuse" only when the reconciliation genuinely does not hold the facts the question needs — not merely because no registered metric covers it, since a plan can compute most money questions. These books hold orders, their values, channels, weeks, commission and fulfilment fees, tax withheld, what reached the bank, distinct order counts, settlement rows, exceptions, learned rules and recovery claims. They do NOT hold products or SKUs, cost of goods, customers, inventory, shipping carriers, dates within a week, or anything about the future. Do not offer a different chart as a consolation, and do not approximate — an approximate answer to a money question is worse than no answer, because nobody checks it.
+Prefer a plan over a browse whenever the question is a count, a total, an average or a share: a computed figure is verified arithmetic, and a read one is not.
 
-Write a refusal the way the rest of this system writes one. Name what the reconciliation actually holds, then the specific fact that is missing, then say plainly that it cannot be computed here at all. Where a metric in the registry is adjacent but is not the same measure, name it and say why it is not the answer — that tells the operator what they can ask for next without pretending it answers this. Attribute the limit to the registry and the data, never to "the deployed build": the shape of the reconciliation is what is missing, not a feature of this particular host.
+THE PLAN VOCABULARY. Three sources. A plan names one source, one measure from that source, an optional second measure to divide by, and one dimension to group by. Only the measures and dimensions listed under a source may be used with it.
+
+${vocabulary()}
+
+Plan fields:
+- source (required), measure (required), groupBy (required — a dimension of that source, or "none" for a single total)
+- per (optional): a second measure of the same source to divide by. money gross per orders is average order value; exceptions impact per count is the average rupees per exception; money deductions per gross is a percentage of gross.
+- filters (optional): a list of {dim, values} on dimensions of that source. e.g. {dim:"channel", values:["myntra"]} or {dim:"status", values:["pending"]}.
+- fromBatch / toBatch (optional): a week range, 1 to 10.
+- sort (optional): "desc" for largest first, "asc" for smallest. Use it whenever the question says highest, lowest, worst, best or top. A week-by-week series always stays in week order.
+- limit (optional): keep only the first N groups after sorting.
+
+Worked examples:
+- "which channel got the lowest conflicts" -> source "exceptions", measure "count", groupBy "channel", sort "asc".
+- "highest average order value by channel" -> source "money", measure "gross", per "orders", groupBy "channel", sort "desc".
+- "how many orders did we settle each week" -> source "money", measure "orders", groupBy "batch".
+- "what is Myntra keeping as a share of gross" -> source "money", measure "deductions", per "gross", groupBy "channel", filters [{dim:"channel", values:["myntra"]}].
+- "which cause costs us the most money" -> source "exceptions", measure "impact", groupBy "cause", sort "desc".
+- "how much are we still chasing from each platform" -> source "claims", measure "amount", groupBy "platform", filters [{dim:"status", values:["filed","drafted"]}], sort "desc".
+- "how many exceptions is a person still working" -> source "exceptions", measure "count", groupBy "none", filters [{dim:"status", values:["pending"]}].
+- "what did we actually bank in the first three weeks" -> source "money", measure "net", groupBy "batch", fromBatch 1, toBatch 3.
+
+Worked examples of browse:
+- "what did the bookkeeper say about the Myntra rate" -> browse source "exceptions", filters [{dim:"channel", values:["myntra"]}].
+- "why did claim CLM-0005 expire" -> browse source "claims", filters [{dim:"status", values:["expired"]}].
+- "what kinds of thing is a person still working on" -> browse source "exceptions", filters [{dim:"status", values:["pending"]}].
+
+Notes that prevent wrong answers:
+- Grouping is not filtering. "By channel" is groupBy "channel"; "on Myntra" is a filter. A question can do both.
+- On exceptions, "cause" is what the system concluded. "true_cause" is the answer key and should only be used if the question explicitly asks what the causes really were.
+- The books are ten weekly batches. A "week" and a "batch" are the same thing. There are no dates finer than a week.
+
+WHEN TO REFUSE. Only when the data does not contain the subject at all. If the subject is present but the shape is awkward, use browse rather than declining. What is held: orders and their values, channels, weeks, commission and fulfilment fees, tax withheld (GST on fees, TCS, TDS), money that reached the bank, order and settlement-row counts, every exception with its cause and rupee impact and how it was resolved, the learned rules, and recovery claims with their filing deadlines. What is NOT held: products or SKUs, cost of goods or profit, customers, inventory, shipping carriers, individual dates within a week, employees, and anything about the future — there is no forecast in this system.
+
+Do not refuse merely because no registered metric covers the question; a plan almost certainly does. Do not offer a different chart as a consolation, and never approximate — an approximate answer to a money question is worse than no answer, because nobody checks it.
+
+Write a refusal the way the rest of this system writes one: name what the reconciliation holds, then the specific fact that is missing, then say plainly it cannot be computed here at all. Attribute the limit to the data, never to "the deployed build".
 
 A refusal in the right register, for "which of our SKUs are least profitable?":
-"This reconciliation holds orders, settlements and bank credits. It has no product master and no cost of goods, so profitability per SKU cannot be computed here at all — not approximately, and not from an adjacent figure."`
+"This reconciliation holds orders, settlements and bank credits. It has no product master and no cost of goods, so profitability per SKU cannot be computed here at all — not approximately, and not from an adjacent figure."
+`
 
 const catalogue = () =>
   REGISTRY.map(([id, unit, groupings, description]) =>
@@ -124,21 +166,57 @@ const renderUser = (question) => [
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    outcome: { type: 'string', enum: ['mapped', 'computed', 'clarify', 'refuse'] },
+    outcome: { type: 'string', enum: ['mapped', 'computed', 'browse', 'clarify', 'refuse'] },
     metric_id: { type: 'string', enum: METRIC_IDS, nullable: true },
     group_by: { type: 'string', enum: GROUPINGS, nullable: true },
     plan: {
       type: 'object',
       nullable: true,
       properties: {
-        measure: { type: 'string', enum: Object.keys(MEASURES) },
-        per: { type: 'string', enum: Object.keys(DENOMINATORS), nullable: true },
-        groupBy: { type: 'string', enum: PLAN_GROUPINGS, nullable: true },
-        channels: { type: 'array', nullable: true, items: { type: 'string', enum: CHANNELS } },
+        source: { type: 'string', enum: SOURCE_IDS },
+        measure: { type: 'string', enum: ALL_MEASURES },
+        per: { type: 'string', enum: ALL_MEASURES, nullable: true },
+        groupBy: { type: 'string', enum: [...ALL_DIMS, 'none'] },
+        filters: {
+          type: 'array',
+          nullable: true,
+          items: {
+            type: 'object',
+            properties: {
+              dim: { type: 'string', enum: ALL_DIMS },
+              values: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['dim', 'values'],
+          },
+        },
+        fromBatch: { type: 'integer', nullable: true },
+        toBatch: { type: 'integer', nullable: true },
+        sort: { type: 'string', enum: ['asc', 'desc'], nullable: true },
+        limit: { type: 'integer', nullable: true },
+      },
+      required: ['source', 'measure', 'groupBy'],
+    },
+    browse: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        source: { type: 'string', enum: SOURCE_IDS },
+        filters: {
+          type: 'array',
+          nullable: true,
+          items: {
+            type: 'object',
+            properties: {
+              dim: { type: 'string', enum: ALL_DIMS },
+              values: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['dim', 'values'],
+          },
+        },
         fromBatch: { type: 'integer', nullable: true },
         toBatch: { type: 'integer', nullable: true },
       },
-      required: ['measure', 'groupBy'],
+      required: ['source'],
     },
     restatement: { type: 'string' },
     clarifying_question: { type: 'string', nullable: true },
@@ -146,7 +224,7 @@ const RESPONSE_SCHEMA = {
   },
   required: ['outcome', 'restatement'],
   propertyOrdering: [
-    'outcome', 'metric_id', 'group_by', 'plan',
+    'outcome', 'metric_id', 'group_by', 'plan', 'browse',
     'restatement', 'clarifying_question', 'refusal',
   ],
 }
@@ -154,7 +232,9 @@ const RESPONSE_SCHEMA = {
 /** The outcome must carry the field it exists for. Mirrors `_outcome_carries_its_payload`. */
 function validate(intent) {
   const { outcome } = intent
-  if (!['mapped', 'computed', 'clarify', 'refuse'].includes(outcome)) return 'unknown outcome'
+  if (!['mapped', 'computed', 'browse', 'clarify', 'refuse'].includes(outcome)) {
+    return 'unknown outcome'
+  }
   if (!intent.restatement || intent.restatement.length < 15) return 'restatement missing'
 
   if (outcome === 'mapped') {
@@ -175,12 +255,19 @@ function validate(intent) {
     // caught here rather than becoming an error message where a chart should be.
     const bad = validatePlan(intent.plan)
     if (bad) return bad
-    const { fromBatch, toBatch } = intent.plan
-    if (fromBatch != null && toBatch != null && fromBatch > toBatch) {
-      return 'the week range runs backwards'
-    }
     // A computed answer is not a registered metric and must not borrow the name of one.
     intent.metric_id = null
+    intent.browse = null
+    return null
+  }
+
+  if (outcome === 'browse') {
+    if (!intent.browse) return 'browse without a selection'
+    // Validated through the same vocabulary as a plan, minus the aggregation half.
+    const bad = validatePlan({ ...intent.browse, measure: MEASURE_FOR[intent.browse.source] })
+    if (bad) return bad
+    intent.metric_id = null
+    intent.plan = null
     return null
   }
 
@@ -188,9 +275,42 @@ function validate(intent) {
   // reads as an answer on screen. Both declining outcomes must arrive empty-handed.
   if (intent.metric_id) return `${outcome} must not name a metric`
   if (intent.plan) return `${outcome} must not carry a plan`
+  if (intent.browse) return `${outcome} must not carry a selection`
   if (outcome === 'clarify' && !intent.clarifying_question) return 'clarify without a question'
   if (outcome === 'refuse' && !intent.refusal) return 'refuse without a reason'
   return null
+}
+
+/** One call to the model. Both paths go through it, so retries and errors read alike. */
+async function askGemini(key, { system, user, schema }) {
+  try {
+    const upstream = await fetch(ENDPOINT(MODEL), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: {
+          temperature: 0,
+          ...(schema
+            ? { responseMimeType: 'application/json', responseSchema: schema }
+            : {}),
+        },
+      }),
+    })
+    if (!upstream.ok) {
+      const detail = await upstream.text()
+      console.error('gemini upstream', upstream.status, detail.slice(0, 500))
+      return { error: `The model service returned ${upstream.status}.`, status: 502 }
+    }
+    const payload = await upstream.json()
+    const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) return { error: 'The model returned no content.', status: 502 }
+    return { text }
+  } catch (err) {
+    console.error('gemini call failed', err)
+    return { error: 'Could not reach the model service.', status: 502 }
+  }
 }
 
 export default async function handler(req, res) {
@@ -210,35 +330,39 @@ export default async function handler(req, res) {
   if (!question) return res.status(400).json({ error: 'Ask a question.' })
   if (question.length > 500) return res.status(400).json({ error: 'That question is too long.' })
 
+  // Mode "read" is the second half of the browse fallback: the browser has already
+  // selected and capped the rows through the shared validator, and this only reads them.
+  if (req.body?.mode === 'read') {
+    const rows = req.body?.rows
+    if (!Array.isArray(rows) || !rows.length) {
+      return res.status(400).json({ error: 'No rows to read.' })
+    }
+    if (rows.length > BROWSE_CAP) {
+      return res.status(400).json({ error: `Too many rows: ${rows.length} over the ${BROWSE_CAP} cap.` })
+    }
+    const note = req.body?.truncated
+      ? `\n\nThis list was capped at ${rows.length} of ${req.body.total} matching rows.`
+      : `\n\nThis is all ${rows.length} matching rows.`
+    const answer = await askGemini(key, {
+      system: READ_SYSTEM,
+      user: `Question: ${question}\n\nRows:\n${JSON.stringify(rows)}${note}`,
+    })
+    if (answer.error) return res.status(answer.status).json({ error: answer.error })
+    return res.status(200).json({ outcome: 'read', answer: answer.text, model: MODEL, source: 'live' })
+  }
+
+  const mapped = await askGemini(key, {
+    system: SYSTEM,
+    user: renderUser(question),
+    schema: RESPONSE_SCHEMA,
+  })
+  if (mapped.error) return res.status(mapped.status).json({ error: mapped.error })
+
   let reply
   try {
-    const upstream = await fetch(ENDPOINT(MODEL), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: 'user', parts: [{ text: renderUser(question) }] }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-        },
-      }),
-    })
-
-    if (!upstream.ok) {
-      const detail = await upstream.text()
-      console.error('gemini upstream', upstream.status, detail.slice(0, 500))
-      return res.status(502).json({ error: `The model service returned ${upstream.status}.` })
-    }
-
-    const payload = await upstream.json()
-    const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) return res.status(502).json({ error: 'The model returned no content.' })
-    reply = JSON.parse(text)
-  } catch (err) {
-    console.error('gemini call failed', err)
-    return res.status(502).json({ error: 'Could not reach the model service.' })
+    reply = JSON.parse(mapped.text)
+  } catch {
+    return res.status(502).json({ error: 'The model returned content that was not JSON.' })
   }
 
   // No fallback branch, for the same reason the Python client has none: a reply that

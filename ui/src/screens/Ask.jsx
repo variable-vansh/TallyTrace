@@ -6,7 +6,7 @@ import {
 import MetricChart from '../components/MetricChart'
 import StatusBadge from '../components/StatusBadge'
 import { useStored } from '../lib/useStored'
-import { computePlan, describeScope } from '../lib/compute'
+import { browseRows, computePlan, describeScope, headline } from '../lib/compute'
 
 // Two things live on this screen, and the split is the product.
 //
@@ -68,6 +68,7 @@ const OUTCOME = {
   refuse: { icon: Slash, tone: 'border-divider bg-gray-50', label: 'refused' },
   unasked: { icon: Search, tone: 'border-divider bg-gray-50', label: 'not in the fixtures' },
   asking: { icon: Search, tone: 'border-divider bg-gray-50', label: 'mapping…' },
+  browse: { icon: BookOpen, tone: 'border-divider bg-gray-50', label: 'read from rows' },
 }
 
 function Bubble({ from, children }) {
@@ -92,7 +93,7 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
     return <Bubble from="operator"><p className="text-sm">{turn.text}</p></Bubble>
   }
 
-  const asking = turn.state === 'asking'
+  const asking = turn.state === 'asking' || turn.state === 'reading'
   const meta = asking ? OUTCOME.asking : OUTCOME[turn.outcome] || OUTCOME.unasked
   const Icon = meta.icon
 
@@ -104,7 +105,7 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
           asking ? 'muted'
             : turn.outcome === 'mapped' ? 'success' : turn.outcome === 'clarify' ? 'amber' : 'muted'
         }>
-          {meta.label}
+          {turn.state === 'reading' ? 'reading rows…' : meta.label}
         </StatusBadge>
         {turn.metricId && (
           <span className="font-mono text-[11px] text-muted">{turn.metricId}</span>
@@ -142,6 +143,16 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
         </div>
       )}
 
+      {/* An answer read off rows is the model's reading of real rows, not verified
+          arithmetic. It is the fallback, and it says which it is rather than looking
+          like a computed figure. */}
+      {turn.state === 'read' && (
+        <p className="text-[11px] text-muted mt-2 pt-2 border-t border-divider">
+          Read from {turn.rowsRead} rows of this run, not computed. A number that has to be
+          exact is better asked as a metric.
+        </p>
+      )}
+
       {turn.state === 'declined' && (
         <p className="text-xs text-muted mt-2">Nothing was computed. Rephrase, or pick a metric.</p>
       )}
@@ -169,6 +180,12 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
             </span>
             <span className="text-[11px] text-muted">by {turn.result.group_by}</span>
           </div>
+          {/* The answer, in words, before the chart. Derived from the result rather
+              than written about it — every figure is substituted, never re-typed by a
+              model, for the same reason the claim drafter is forbidden a numeral. */}
+          {headline(turn.result) && (
+            <p className="text-sm font-semibold text-gray-900 mb-2">{headline(turn.result)}</p>
+          )}
           <MetricChart result={turn.result} height={200} />
           <div className="flex items-center justify-between gap-2 mt-2">
             {/* Two different provenances, said differently. A registered metric is a
@@ -176,7 +193,7 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
                 aggregates, run here. Neither had a model anywhere past the mapping. */}
             <span className="text-[11px] text-muted">
               {turn.result.computed
-                ? 'Computed here from the reconciled cube — not a registered metric, and no model past the plan above.'
+                ? 'Computed here from the reconciled run — not a registered metric, and no model past the plan above.'
                 : 'Computed by the registry — no model past the mapping above.'}
             </span>
             <button
@@ -308,24 +325,29 @@ export default function Ask({ data }) {
   // Ask the deployed mapper. It returns an id and a restatement — never a number.
   // The lookup afterwards is this app reading a result the registry already computed,
   // which is why the confirm step still means what it says.
-  const askLive = async (question, id) => {
-    let reply
+  // One POST, used by both halves: the mapping call, and the read call the browse
+  // fallback makes once rows have been selected.
+  const ask = async (body) => {
     try {
       const response = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify(body),
       })
       if (response.status === 501 || response.status === 404) {
-        return offline(id, 'Not in this run’s fixtures, and this build has no live mapper.')
+        return { error: 'this build has no live mapper.' }
       }
-      reply = await response.json()
-      if (!response.ok) {
-        return offline(id, `Not in this run’s fixtures. ${reply.error || 'The mapper failed.'}`)
-      }
+      const payload = await response.json()
+      if (!response.ok) return { error: payload.error || 'The mapper failed.' }
+      return payload
     } catch {
-      return offline(id, 'Not in this run’s fixtures, and the mapper could not be reached.')
+      return { error: 'the mapper could not be reached.' }
     }
+  }
+
+  const askLive = async (question, id) => {
+    const reply = await ask({ question })
+    if (reply.error) return offline(id, `Not in this run’s fixtures, and ${reply.error}`)
 
     if (reply.outcome === 'refuse') {
       return amend(id, { outcome: 'refuse', state: 'idle', text: reply.refusal, registry: null })
@@ -343,7 +365,7 @@ export default function Ask({ data }) {
     // books. The model chose what to compute; this computes it, here, from the same
     // cube the registry was built from.
     if (reply.outcome === 'computed') {
-      const computed = computePlan(data.facts, reply.plan)
+      const computed = computePlan(data, reply.plan)
       if (computed.error) {
         return offline(id, `That plan could not be run: ${computed.error}.`)
       }
@@ -357,6 +379,30 @@ export default function Ask({ data }) {
         result: null,
         pending: computed,
         registry: null,
+      })
+    }
+
+    // The data holds it, but not as an aggregation. Select the rows here — through the
+    // same validated vocabulary — and hand only those back to be read.
+    if (reply.outcome === 'browse') {
+      const picked = browseRows(data, reply.browse)
+      if (picked.error) return offline(id, `Nothing to read: ${picked.error}.`)
+      amend(id, {
+        outcome: 'browse', state: 'reading', text: reply.restatement, live: reply.model,
+        computedFrom: `reading ${picked.rows.length} of ${picked.total} ${reply.browse.source} rows`,
+      })
+      const read = await ask({
+        question, mode: 'read', rows: picked.rows,
+        total: picked.total, truncated: picked.truncated,
+      })
+      if (read.error) return offline(id, read.error)
+      return amend(id, {
+        outcome: 'browse',
+        state: 'read',
+        text: read.answer,
+        live: read.model,
+        computedFrom: `read from ${picked.rows.length} of ${picked.total} ${reply.browse.source} rows`,
+        rowsRead: picked.rows.length,
       })
     }
 

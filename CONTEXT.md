@@ -395,25 +395,37 @@ ten registered metrics — the published, pinnable figures), `computed` (no metr
 but the question is arithmetic over the books), `clarify`, and `refuse`.
 
 **On `computed` the model fills in a plan, never the arithmetic.** A plan is a closed
-vocabulary — seven measures (gross, net, fees, taxes, deductions, orders,
-settlement_rows), three optional denominators (per order, per settlement row, as a
-percentage of gross), a grouping, and channel and week filters — executed by
-`ui/src/lib/compute.js`. No query, no generated expression, nothing evaluated. The
+vocabulary over three fact tables — the money (gross, net, fees, taxes, deductions,
+orders, settlement rows), the exceptions (count and rupee impact, by cause, reason,
+bucket, status, outcome, rule) and the claims (count, amount, recovered, by platform and
+status) — naming one source, a measure, an optional second measure to divide by, a
+grouping, filters, a week range and a sort. Executed by `ui/src/lib/compute.js`. No query, no generated expression, nothing evaluated. The
 failure mode is "picked the wrong measure", which the restatement shows a person before
 it runs; not "returned a plausible wrong number", which is what generated SQL does. The
 validator is imported by both the server and the browser, so the thing that decides a
 plan is legal and the thing that runs it cannot disagree.
 
-Plans compute over a **`facts` cube** shipped in `tallytrace.json`: 50 rows, one per
-batch per channel, emitted from the same `BatchFacts` the Python registry reads.
+The money table is a **`facts` cube** shipped in `tallytrace.json`: 50 rows, one per
+batch per channel, emitted from the same `BatchFacts` the Python registry reads. The
+other two are read straight off the payload the screens already render, so nothing can
+drift from what the rest of the UI shows.
 `tests/test_ui_data.py` asserts the cube reproduces the registry's published gross, net
 and take rate to the paisa. It is aggregates rather than raw rows because the UI's
 ledger view repeats an order in every batch that carries it forward — 1,049 orders
 appear 2,625 times — so summing those rows would overstate the books by 2.5×.
 
-**Refusal still exists and now means something stricter:** the books do not hold the
+**Two more paths, added last.** A `browse` outcome handles questions that are not
+aggregations — an operator's note, a claim letter, two sources at once: the model picks a
+source and filters, at most 200 rows are selected through the same validated vocabulary,
+and it answers from those. The UI labels that *read from rows*, because it is a weaker
+guarantee than computed arithmetic. And every computed result carries a one-sentence
+answer above the chart, composed from the result with every figure substituted rather
+than re-typed by a model — the same rule the claim drafter follows.
+
+**Refusal still exists and now means something stricter:** the run does not hold the
 fact, rather than no metric was registered for it. SKU profitability still refuses (no
-product master, no cost of goods); average order value now answers.
+product master, no cost of goods); average order value and exceptions-per-channel now
+answer.
 
 Fixtures are tried first, so only an unasked question reaches the model, and the answer
 is labelled **mapped live** on screen. **No scored number in this file depends on any of
@@ -578,9 +590,6 @@ that looks like the finding you were hoping for does not get checked.
   batches, which is what lets the clean base reconcile at exactly 100%; the cost is
   that batch 1 carries a large opening book (173 ledger rows) and batch 10's ledger is
   small (24 rows), so cross-batch causes are under-represented at both ends.
-
-- **No video is recorded.** `VIDEO.md` holds the shot list and script with every number
-  sourced to a command, but the recording has not happened.
 
 ---
 
