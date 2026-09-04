@@ -294,6 +294,43 @@ def claims(score: Score) -> list[dict[str, Any]]:
     ]
 
 
+def facts(score: Score) -> list[dict[str, Any]]:
+    """The reconciled money as a small cube: one row per batch per channel.
+
+    The ten registered metrics are the *questions this run has already answered*. This
+    is the material they were computed from, shipped so the ask surface can answer a
+    question nobody anticipated -- average order value, orders per channel, fees as a
+    share of anything -- without a metric having been registered for it in advance.
+
+    It is emitted from :class:`BatchFacts`, which is the same aggregate the registry
+    reads, so a figure derived here cannot disagree with a figure the registry printed.
+    That is the whole reason this is a cube of aggregates rather than the raw rows: the
+    UI's ledger view repeats an order in every batch that carries it forward (1,049
+    orders appear 2,625 times, because the matcher reads the ledger cumulatively), so
+    anything summing those rows would overstate the books by two and a half times. The
+    deduplication has already happened here, once, in Python.
+
+    Fifty rows. Small enough to ship, complete enough that most money questions about
+    this corpus are arithmetic over it.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in score.reporting.corpus.facts:
+        for channel in sorted(entry.gross_order_value):
+            rows.append(
+                {
+                    "batch": entry.batch,
+                    "channel": channel,
+                    "gross": money(entry.gross_order_value.get(channel)),
+                    "net": money(entry.net_settled.get(channel)),
+                    "fees": money(entry.fees_charged.get(channel)),
+                    "taxes": money(entry.taxes_withheld.get(channel)),
+                    "orders": entry.orders.get(channel, 0),
+                    "settlementRows": entry.settlement_rows.get(channel, 0),
+                }
+            )
+    return rows
+
+
 def metric_result(result: MetricResult) -> dict[str, Any]:
     """One computed metric, with values as numbers because a chart has to do arithmetic."""
     payload = result.to_json()
@@ -427,6 +464,9 @@ def build(score: Score) -> dict[str, Any]:
         "plantedRecoveries": [entry.to_json() for entry in score.claims.planted],
         "claimAttribution": [entry.to_json() for entry in score.claims.attribution],
         "reporting": reporting(score),
+        # The material the registry computed over, so a question nobody registered a
+        # metric for is still arithmetic rather than a refusal. See `facts` above.
+        "facts": facts(score),
         "abstention": [entry.to_json() for entry in score.learning.abstentions],
         "overallPrecision": (
             None if score.learning.overall_precision is None

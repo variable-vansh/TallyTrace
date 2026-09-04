@@ -364,3 +364,63 @@ def test_the_deployed_intent_mapper_mirrors_the_python_registry() -> None:
         f"  grouping mismatches: "
         f"{ {k: (js[k], py[k]) for k in set(js) & set(py) if js[k] != py[k]} }"
     )
+
+
+def test_the_facts_cube_reproduces_the_registry_it_was_built_from(artifacts) -> None:
+    """The ask surface computes over ``facts``; the registry computed over the same rows.
+
+    ``facts`` exists so a question nobody registered a metric for is still arithmetic
+    rather than a refusal -- average order value, orders per channel, fees per row. The
+    whole basis for trusting a figure derived that way is that it is derived from the
+    aggregate the registry itself reads, so it cannot quietly disagree with a number
+    this run already published.
+
+    Asserted against the registry's own precomputed results rather than against a
+    literal, so it keeps holding when the corpus is regenerated. Gross and net are
+    checked to the paisa; the take rate is checked because it is a *ratio* of two
+    measures, which is the shape the ask surface derives and the one where summing the
+    wrong way -- averaging per-batch rates instead of dividing summed totals -- would
+    silently produce a plausible wrong number.
+    """
+    _, payload = artifacts
+    cube = payload["facts"]
+    results = payload["reporting"]["results"]
+
+    assert cube, "the facts cube is empty"
+    assert {"batch", "channel", "gross", "net", "fees", "taxes", "orders"} <= set(cube[0])
+
+    def summed(field: str) -> dict[str, Decimal]:
+        totals: dict[str, Decimal] = {}
+        for row in cube:
+            totals[row["channel"]] = totals.get(row["channel"], D("0")) + D(str(row[field]))
+        return totals
+
+    for field, metric_id in (("gross", "gross_order_value"), ("net", "net_revenue_by_channel")):
+        published = {
+            point["label"]: D(str(point["value"]))
+            for point in results[f"{metric_id}|channel"]["points"]
+        }
+        derived = summed(field)
+        assert set(derived) == set(published), f"{field}: channels differ from {metric_id}"
+        for channel, value in published.items():
+            assert abs(derived[channel] - value) <= D("0.01"), (
+                f"{field} for {channel} is {derived[channel]} in the cube "
+                f"but {value} in {metric_id}"
+            )
+
+    # The ratio. Deductions over gross, divided once per channel -- never averaged.
+    fees, taxes, gross = summed("fees"), summed("taxes"), summed("gross")
+    published_rate = {
+        point["label"]: D(str(point["value"]))
+        for point in results["effective_take_rate|channel"]["points"]
+    }
+    for channel, rate in published_rate.items():
+        derived = (fees[channel] + taxes[channel]) / gross[channel] * 100
+        assert abs(derived - rate) <= D("0.01"), (
+            f"take rate for {channel} derives as {derived:.2f} from the cube "
+            f"but the registry published {rate}"
+        )
+
+    # And the count the registry has no metric for, which is the reason the cube ships:
+    # without it there is no denominator for any per-order question.
+    assert sum(row["orders"] for row in cube) > 0, "no order counts to average over"

@@ -81,7 +81,7 @@ refuses what it cannot compute.
 | Questions asked / mapped / declined | 11 / 8 / **3** (1 clarification, 2 refusals) |
 | Model spend | ₹160.13 total, **₹0.13 per settlement row** |
 | Open, unresolved, itemised | **666 exceptions, ₹498,604.90** — every one listed in `EXCEPTIONS.md` |
-| Tests | 379 test functions, 411 cases |
+| Tests | 380 test functions, 412 cases |
 
 ## The problem being solved
 
@@ -390,15 +390,34 @@ fallback is how an invented cause reaches a bookkeeper wearing a confidence scor
 
 **One of the four also runs in the deployed build.** `ui/api/ask.js` is intent mapping
 ported to a Vercel serverless function against **Gemini**, so a deployed page can answer
-a question outside the committed fixtures. Same contract: one id from the frozen ten, or
-decline; never computes, never queries, never sees a row; and its response schema
-*cannot express a filter*, because the deployed build holds whole-corpus results only.
-The three outcomes are validated server-side exactly as `MetricIntent` validates them —
-a `refuse` that also names a metric is rejected, not repaired. Fixtures are tried first,
-so only an unasked question reaches it, and the answer is labelled **mapped live** on
-screen. `tests/test_ui_data.py` fails if its mirrored registry drifts from
-`pipeline/metrics/registry.py`. **No scored number in this file depends on it** — `make
-demo` runs `--offline` and refuses the network even with a key set.
+a question outside the committed fixtures. It has four outcomes: `mapped` (one of the
+ten registered metrics — the published, pinnable figures), `computed` (no metric fits,
+but the question is arithmetic over the books), `clarify`, and `refuse`.
+
+**On `computed` the model fills in a plan, never the arithmetic.** A plan is a closed
+vocabulary — seven measures (gross, net, fees, taxes, deductions, orders,
+settlement_rows), three optional denominators (per order, per settlement row, as a
+percentage of gross), a grouping, and channel and week filters — executed by
+`ui/src/lib/compute.js`. No query, no generated expression, nothing evaluated. The
+failure mode is "picked the wrong measure", which the restatement shows a person before
+it runs; not "returned a plausible wrong number", which is what generated SQL does. The
+validator is imported by both the server and the browser, so the thing that decides a
+plan is legal and the thing that runs it cannot disagree.
+
+Plans compute over a **`facts` cube** shipped in `tallytrace.json`: 50 rows, one per
+batch per channel, emitted from the same `BatchFacts` the Python registry reads.
+`tests/test_ui_data.py` asserts the cube reproduces the registry's published gross, net
+and take rate to the paisa. It is aggregates rather than raw rows because the UI's
+ledger view repeats an order in every batch that carries it forward — 1,049 orders
+appear 2,625 times — so summing those rows would overstate the books by 2.5×.
+
+**Refusal still exists and now means something stricter:** the books do not hold the
+fact, rather than no metric was registered for it. SKU profitability still refuses (no
+product master, no cost of goods); average order value now answers.
+
+Fixtures are tried first, so only an unasked question reaches the model, and the answer
+is labelled **mapped live** on screen. **No scored number in this file depends on any of
+it** — `make demo` runs `--offline` and refuses the network even with a key set.
 
 ## Refused, in six places — each for a reason
 
@@ -616,7 +635,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      379 test functions, 411 cases
+tests/      380 test functions, 412 cases
 ```
 
 **The UI.** Seven screens — Dashboard, Review Queue, Transactions, Claims, Rules, Ask,

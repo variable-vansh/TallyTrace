@@ -508,7 +508,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      379 test functions, 411 cases
+tests/      380 test functions, 412 cases
 ```
 
 Four artifacts leave a run and all four are committed: `EXCEPTIONS.md` (what it could not
@@ -1352,14 +1352,49 @@ fixtures. `ui/api/ask.js` is a serverless function that does the same job as
 `pipeline/llm/intent.py` — map a question onto one registered metric, or decline — in
 Node, against Gemini, because a browser cannot run the Python one.
 
-**It is the same contract, not a new capability.** It chooses one id from the frozen
-ten-metric registry or declines; it never computes, never writes a query and never sees
-a row; and its response schema *cannot express a filter*, because the deployed build
-holds whole-corpus results only and a schema that cannot promise a filter cannot break
-one. Every rupee on screen still comes from the registry's own pure functions, computed
-by `make score` before the build. The three outcomes are validated server-side the way
-`MetricIntent` validates them in Python — a `refuse` that also names a metric is
-rejected rather than repaired, because on screen it would read as an answer.
+**The model chooses what to compute. It never writes the arithmetic.** It has four
+outcomes, and two of them are answers:
+
+| Outcome | What it means |
+|---|---|
+| `mapped` | one of the ten registered metrics answers this. These are the figures `make score` already published, and they are the ones that can be pinned |
+| `computed` | no registered metric fits, but the question is arithmetic over the books. The model fills in a **plan** — which measure, over what denominator, grouped how, filtered to which channels and weeks — and `ui/src/lib/compute.js` executes it |
+| `clarify` | two readings would give materially different numbers. One question, nothing computed |
+| `refuse` | the reconciliation genuinely does not hold the facts the question needs |
+
+A plan is drawn from a closed vocabulary: seven measures (`gross`, `net`, `fees`,
+`taxes`, `deductions`, `orders`, `settlement_rows`), three optional denominators (per
+order, per settlement row, as a percentage of gross), a grouping, and channel and week
+filters. **There is no query, no generated expression and nothing evaluated.** The
+failure mode is "picked the wrong measure", which the restatement puts in front of a
+person before it runs — not "returned a plausible wrong number", which is what generated
+SQL does. `validatePlan` runs server-side *and* in the browser, from the same module, so
+the thing that decides a plan is legal and the thing that runs it cannot disagree.
+
+Every outcome is validated the way `MetricIntent` validates them in Python — a `refuse`
+that also names a metric or carries a plan is rejected rather than repaired, because on
+screen it would read as an answer.
+
+### What a plan computes over
+
+`ui/public/tallytrace.json` carries a **`facts` cube**: fifty rows, one per batch per
+channel, holding gross order value, net settled, fees, taxes, distinct orders and
+settlement rows. It is emitted from `BatchFacts` — the same aggregate
+`pipeline/metrics/registry.py` reads — so a figure derived from it cannot disagree with
+one the registry printed. `tests/test_ui_data.py` asserts exactly that, to the paisa,
+including the take rate, because a ratio is the shape where summing the wrong way
+produces a plausible wrong number.
+
+**It is a cube of aggregates rather than the raw rows for a specific reason.** The UI's
+ledger view repeats an order in every batch that carries it forward — 1,049 orders
+appear 2,625 times, because the matcher reads the ledger cumulatively — so anything
+summing those rows would overstate the books by two and a half times. The
+deduplication has already happened, once, in Python.
+
+**Refusal did not go away; it got honest.** It now means *the books do not hold this
+fact*, rather than *no metric was registered for it*. "Which SKUs are least profitable"
+still refuses — there is no product master and no cost of goods. "Highest average order
+value by channel" now answers, because orders and their values are right there.
 
 Fixtures are still tried first, so the eleven logged questions cost nothing and stay
 deterministic. Only an unasked question reaches the model, and the answer is labelled

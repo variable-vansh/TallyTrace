@@ -6,6 +6,7 @@ import {
 import MetricChart from '../components/MetricChart'
 import StatusBadge from '../components/StatusBadge'
 import { useStored } from '../lib/useStored'
+import { computePlan, describeScope } from '../lib/compute'
 
 // Two things live on this screen, and the split is the product.
 //
@@ -117,6 +118,12 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
 
       <p className="text-sm text-gray-800 leading-relaxed">{turn.text}</p>
 
+      {/* The plan in words, under the restatement, so what is about to run is legible
+          before it runs rather than only describable afterwards. */}
+      {turn.computedFrom && (
+        <p className="font-mono text-[11px] text-muted mt-1.5">{turn.computedFrom}</p>
+      )}
+
       {turn.state === 'awaiting' && (
         <div className="flex items-center gap-2 mt-3">
           <button
@@ -164,8 +171,13 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
           </div>
           <MetricChart result={turn.result} height={200} />
           <div className="flex items-center justify-between gap-2 mt-2">
+            {/* Two different provenances, said differently. A registered metric is a
+                figure this run published; a computed one is arithmetic over the same
+                aggregates, run here. Neither had a model anywhere past the mapping. */}
             <span className="text-[11px] text-muted">
-              Computed by the registry — no model past the mapping above.
+              {turn.result.computed
+                ? 'Computed here from the reconciled cube — not a registered metric, and no model past the plan above.'
+                : 'Computed by the registry — no model past the mapping above.'}
             </span>
             <button
               onClick={() => onPin(turn)}
@@ -261,6 +273,11 @@ export default function Ask({ data }) {
     return index
   }, [reporting.questions])
 
+  const keyOf = (result) =>
+    result.computed
+      ? `computed|${JSON.stringify(result.plan)}`
+      : `${result.metric_id}|${result.group_by}`
+
   const resultFor = (metricId, grouping) =>
     reporting.results[`${metricId}|${grouping}`] || null
 
@@ -319,6 +336,27 @@ export default function Ask({ data }) {
         state: 'idle',
         text: reply.clarifying_question,
         registry: reporting.registry,
+      })
+    }
+
+    // No registered metric fits, but the question is arithmetic over the reconciled
+    // books. The model chose what to compute; this computes it, here, from the same
+    // cube the registry was built from.
+    if (reply.outcome === 'computed') {
+      const computed = computePlan(data.facts, reply.plan)
+      if (computed.error) {
+        return offline(id, `That plan could not be run: ${computed.error}.`)
+      }
+      return amend(id, {
+        outcome: 'mapped',
+        state: 'awaiting',
+        metricId: null,
+        text: reply.restatement,
+        live: reply.model,
+        computedFrom: `${computed.title.toLowerCase()} · ${describeScope(reply.plan)}`,
+        result: null,
+        pending: computed,
+        registry: null,
       })
     }
 
@@ -416,13 +454,9 @@ export default function Ask({ data }) {
 
   const pin = (turn) =>
     setSessionPins((prev) =>
-      prev.some((p) => p.key === `${turn.result.metric_id}|${turn.result.group_by}`)
+      prev.some((p) => p.key === keyOf(turn.result))
         ? prev
-        : [...prev, {
-            key: `${turn.result.metric_id}|${turn.result.group_by}`,
-            name: turn.result.title,
-            result: turn.result,
-          }]
+        : [...prev, { key: keyOf(turn.result), name: turn.result.title, result: turn.result }]
     )
 
   // Deep link, once, on mount. `submitted` guards against the effect re-running and
@@ -442,8 +476,7 @@ export default function Ask({ data }) {
   const showingDemo = turns.length > 0 && turns.every((turn) => turn.demo)
 
   const isPinned = (turn) =>
-    turn.result &&
-    sessionPins.some((p) => p.key === `${turn.result.metric_id}|${turn.result.group_by}`)
+    turn.result && sessionPins.some((p) => p.key === keyOf(turn.result))
 
   // One list of cards, in the viewer's order, session pins first until they are moved.
   const cards = useMemo(() => {

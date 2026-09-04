@@ -14,6 +14,11 @@
 // The key is read from the environment and never leaves this function. Anything
 // prefixed VITE_ is compiled into the browser bundle, so the key must not be.
 
+// Imported, not mirrored: the plan vocabulary and its validator are the same module the
+// browser evaluates with, so the thing that decides a plan is legal and the thing that
+// runs it cannot disagree.
+import { MEASURES, DENOMINATORS, GROUPINGS as PLAN_GROUPINGS, validatePlan } from '../src/lib/compute.js'
+
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 const ENDPOINT = (model) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
@@ -46,10 +51,12 @@ const REGISTRY = [
 
 const METRIC_IDS = REGISTRY.map(([id]) => id)
 const GROUPINGS = ['channel', 'batch', 'cause', 'platform']
+const CHANNELS = ['amazon', 'flipkart', 'myntra', 'website', 'offline']
 const GROUPINGS_FOR = Object.fromEntries(REGISTRY.map(([id, , g]) => [id, g]))
 
-// Kept deliberately close to the Python system prompt. The one difference is the
-// paragraph about filters, which is true of this deployment and not of the CLI.
+// Kept deliberately close to the Python system prompt. The differences are the
+// grouping-versus-filter paragraph and the worked refusal, both of which exist because
+// of how this went wrong the first time — see the notes on each below.
 const SYSTEM = `You map a question about a reconciliation dashboard onto exactly one metric from a fixed registry, or you decline.
 
 You never compute anything, you never write a query, and you never see the data. You choose an id, and a deterministic function that has already run does the rest.
@@ -58,9 +65,38 @@ Rules you must follow:
 - Choose only from the metric ids in the schema. There is no nearest match and no "closest available" answer.
 - Choose a grouping the metric supports. The catalogue below lists them per metric.
 - restatement is required on every outcome. Write what is about to be shown in one plain sentence, as it will be put to the operator for confirmation before it runs. Name the metric in words and the grouping.
-- This deployment holds whole-corpus results only. You cannot filter to a single channel or to a range of weeks. If a question can only be answered by such a filter, refuse and say that the deployed build computes the whole ten-week corpus.
-- Use outcome "clarify" when two metrics could genuinely be meant, or when the question turns on a distinction the registry draws and the asker did not. Ask exactly one question. Do not also pick a metric.
-- Use outcome "refuse" when nothing in the registry answers the question. Say plainly what is not available. Do not offer a different chart as a consolation, and do not suggest the answer might be approximated by something adjacent — an approximate answer to a money question is worse than no answer, because nobody checks it.`
+
+Grouping is not filtering, and both are supported:
+- GROUPING by channel, batch, cause or platform is supported wherever the catalogue lists it. "By channel", "per platform", "week by week" and "broken down by cause" are all groupings. Never decline a question for asking to see something broken down.
+- FILTERING to particular channels or a range of weeks is supported on a computed plan (below), through channels, fromBatch and toBatch.
+
+You have two ways to answer, and you should prefer the first:
+
+1. outcome "mapped" — a registered metric answers the question. These are the figures this run already computed and published; they are the verified ones, and they can be pinned to the dashboard. Set metric_id and group_by.
+
+2. outcome "computed" — no registered metric fits, but the question is arithmetic over the reconciled books. Set plan, and leave metric_id empty. The plan is executed by a deterministic function; you are choosing what to compute, not how.
+
+The plan has these fields, and only these:
+- measure (required): ${Object.keys(MEASURES).join(', ')}
+- per (optional): ${Object.keys(DENOMINATORS).join(', ')}. Leave empty to total the measure. Use "order" for a per-order average, "settlement_row" for a per-row average, and "gross" to express the measure as a percentage of gross order value.
+- groupBy: ${PLAN_GROUPINGS.join(', ')}
+- channels (optional): any of amazon, flipkart, myntra, website, offline. Leave empty for all.
+- fromBatch / toBatch (optional): a week range, 1 to 10. Leave empty for the whole corpus.
+
+Worked examples of plans:
+- "highest average order value by channel" -> measure "gross", per "order", groupBy "channel".
+- "how many orders did we settle each week" -> measure "orders", groupBy "batch".
+- "what are Myntra and Amazon keeping as a share of gross" -> measure "deductions", per "gross", groupBy "channel", channels ["myntra","amazon"].
+- "what did we actually bank in the first three weeks" -> measure "net", groupBy "batch", fromBatch 1, toBatch 3.
+- "average tax withheld per order" -> measure "taxes", per "order", groupBy "channel".
+
+- Use outcome "clarify" when two readings could genuinely be meant and they would give materially different numbers. Ask exactly one question. Do not also pick a metric or a plan.
+- Use outcome "refuse" only when the reconciliation genuinely does not hold the facts the question needs — not merely because no registered metric covers it, since a plan can compute most money questions. These books hold orders, their values, channels, weeks, commission and fulfilment fees, tax withheld, what reached the bank, distinct order counts, settlement rows, exceptions, learned rules and recovery claims. They do NOT hold products or SKUs, cost of goods, customers, inventory, shipping carriers, dates within a week, or anything about the future. Do not offer a different chart as a consolation, and do not approximate — an approximate answer to a money question is worse than no answer, because nobody checks it.
+
+Write a refusal the way the rest of this system writes one. Name what the reconciliation actually holds, then the specific fact that is missing, then say plainly that it cannot be computed here at all. Where a metric in the registry is adjacent but is not the same measure, name it and say why it is not the answer — that tells the operator what they can ask for next without pretending it answers this. Attribute the limit to the registry and the data, never to "the deployed build": the shape of the reconciliation is what is missing, not a feature of this particular host.
+
+A refusal in the right register, for "which of our SKUs are least profitable?":
+"This reconciliation holds orders, settlements and bank credits. It has no product master and no cost of goods, so profitability per SKU cannot be computed here at all — not approximately, and not from an adjacent figure."`
 
 const catalogue = () =>
   REGISTRY.map(([id, unit, groupings, description]) =>
@@ -88,21 +124,37 @@ const renderUser = (question) => [
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    outcome: { type: 'string', enum: ['mapped', 'clarify', 'refuse'] },
+    outcome: { type: 'string', enum: ['mapped', 'computed', 'clarify', 'refuse'] },
     metric_id: { type: 'string', enum: METRIC_IDS, nullable: true },
     group_by: { type: 'string', enum: GROUPINGS, nullable: true },
+    plan: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        measure: { type: 'string', enum: Object.keys(MEASURES) },
+        per: { type: 'string', enum: Object.keys(DENOMINATORS), nullable: true },
+        groupBy: { type: 'string', enum: PLAN_GROUPINGS, nullable: true },
+        channels: { type: 'array', nullable: true, items: { type: 'string', enum: CHANNELS } },
+        fromBatch: { type: 'integer', nullable: true },
+        toBatch: { type: 'integer', nullable: true },
+      },
+      required: ['measure', 'groupBy'],
+    },
     restatement: { type: 'string' },
     clarifying_question: { type: 'string', nullable: true },
     refusal: { type: 'string', nullable: true },
   },
   required: ['outcome', 'restatement'],
-  propertyOrdering: ['outcome', 'metric_id', 'group_by', 'restatement', 'clarifying_question', 'refusal'],
+  propertyOrdering: [
+    'outcome', 'metric_id', 'group_by', 'plan',
+    'restatement', 'clarifying_question', 'refusal',
+  ],
 }
 
 /** The outcome must carry the field it exists for. Mirrors `_outcome_carries_its_payload`. */
 function validate(intent) {
   const { outcome } = intent
-  if (!['mapped', 'clarify', 'refuse'].includes(outcome)) return 'unknown outcome'
+  if (!['mapped', 'computed', 'clarify', 'refuse'].includes(outcome)) return 'unknown outcome'
   if (!intent.restatement || intent.restatement.length < 15) return 'restatement missing'
 
   if (outcome === 'mapped') {
@@ -113,12 +165,29 @@ function validate(intent) {
     // refused: the id is the choice that matters, and every metric has exactly one
     // natural grouping to fall back to.
     if (!intent.group_by || !allowed.includes(intent.group_by)) intent.group_by = allowed[0]
+    intent.plan = null
     return null
   }
 
-  // A refusal that also names a metric is the failure worth blocking: it reads as an
-  // answer on screen. Both declining outcomes must arrive empty-handed.
+  if (outcome === 'computed') {
+    if (!intent.plan) return 'computed without a plan'
+    // The same validator the browser runs before evaluating, so an illegal plan is
+    // caught here rather than becoming an error message where a chart should be.
+    const bad = validatePlan(intent.plan)
+    if (bad) return bad
+    const { fromBatch, toBatch } = intent.plan
+    if (fromBatch != null && toBatch != null && fromBatch > toBatch) {
+      return 'the week range runs backwards'
+    }
+    // A computed answer is not a registered metric and must not borrow the name of one.
+    intent.metric_id = null
+    return null
+  }
+
+  // A decline that also names a metric or a plan is the failure worth blocking: it
+  // reads as an answer on screen. Both declining outcomes must arrive empty-handed.
   if (intent.metric_id) return `${outcome} must not name a metric`
+  if (intent.plan) return `${outcome} must not carry a plan`
   if (outcome === 'clarify' && !intent.clarifying_question) return 'clarify without a question'
   if (outcome === 'refuse' && !intent.refusal) return 'refuse without a reason'
   return null
