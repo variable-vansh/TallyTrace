@@ -14,12 +14,14 @@ stay string-typed so the audited artifact never inherits binary rounding.
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 
 import pytest
 
 from harness.metrics import pct
 from harness.score import to_json
+from pipeline.config import REPO_ROOT
 from tools.build_ui_data import build, money
 
 D = Decimal
@@ -323,4 +325,42 @@ def test_the_two_precision_series_agree_at_the_shipped_ceiling_and_only_there(ar
     shipped_wrong = by_ceiling[shipped]["wrong"]
     assert above[-1]["wrong"] > shipped_wrong * 5, (
         "the top of the range should close many more rows with the wrong cause"
+    )
+
+
+def test_the_deployed_intent_mapper_mirrors_the_python_registry() -> None:
+    """`ui/api/ask.js` holds a copy of the registry, and a copy is a thing that rots.
+
+    The deployed build answers a question outside the fixtures by mapping it onto a
+    metric id, and it does that in Node against a different provider — so it cannot
+    import :mod:`pipeline.metrics.registry` and has to mirror it. A mirror that drifts
+    is worse than no mirror: the model would be offered an id the registry cannot
+    compute, or denied one it can, and the failure would surface as a refusal that
+    looks like honest behaviour.
+
+    Asserted both ways, on ids and on the groupings each metric supports, so neither a
+    new metric nor a widened grouping can ship without the deployed prompt learning
+    about it.
+    """
+    from pipeline.metrics.registry import catalogue
+
+    source = (REPO_ROOT / "ui" / "api" / "ask.js").read_text(encoding="utf-8")
+
+    mirrored = re.findall(
+        r"\['([a-z_]+)',\s*'(?:inr|pct|count)',\s*\[([^\]]*)\]", source
+    )
+    assert mirrored, "could not find the mirrored registry in ui/api/ask.js"
+
+    js = {
+        metric_id: sorted(g.strip().strip("'") for g in groupings.split(","))
+        for metric_id, groupings in mirrored
+    }
+    py = {entry["metric_id"]: sorted(entry["groupings"]) for entry in catalogue()}
+
+    assert js == py, (
+        "ui/api/ask.js has drifted from pipeline/metrics/registry.py.\n"
+        f"  only in the deployed mirror: {sorted(set(js) - set(py))}\n"
+        f"  only in the Python registry: {sorted(set(py) - set(js))}\n"
+        f"  grouping mismatches: "
+        f"{ {k: (js[k], py[k]) for k in set(js) & set(py) if js[k] != py[k]} }"
     )

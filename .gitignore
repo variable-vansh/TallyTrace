@@ -27,4 +27,8 @@ data/reconciliation.json
 data/score.json
 data/learning.json
 data/rules.json
-ui/public/tallytrace.json
+
+# ui/public/tallytrace.json is derived too, and it is committed anyway: it is the only
+# file the deployed dashboard reads, and a static host builds the UI without a Python
+# runtime to regenerate it with. Committed means the deployed page and the committed
+# EXCEPTIONS.md always describe the same run. Rebuild it with `make ui-data`.

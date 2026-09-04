@@ -336,10 +336,19 @@ function ApiKeyField() {
         )}
       </div>
       <p className="text-xs text-muted leading-relaxed border-t border-divider pt-3">
-        Kept in this browser only — this page has no server and sends it nowhere. The commands
-        read it from the environment:{' '}
+        Kept in this browser only. This page never sends it anywhere — the commands read a key
+        from the environment:{' '}
         <span className="font-mono">ANTHROPIC_API_KEY=… make ask q=&quot;…&quot;</span>. Treat
         localStorage as a convenience on a machine you control, not a secret store.
+      </p>
+      {/* A deployed build can answer a question outside the fixtures, and the key that
+          does it is not this one and never reaches the browser. Said here because the
+          box above would otherwise imply the page cannot reach a model at all. */}
+      <p className="text-xs text-muted leading-relaxed">
+        A deployed build may also carry its own server-side key, used only to map a new
+        question onto one of the ten registered metrics. That key lives in the deployment
+        environment, never in this page, and the mapping is labelled on screen wherever it
+        happens. It computes nothing: the numbers still come from this scored run.
       </p>
     </div>
   )

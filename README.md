@@ -481,7 +481,7 @@ ground-truth key recording every injection.
 | | |
 |---|---|
 | Settlement rows per batch | 59 → 181, monotonic, every batch over the 50-record floor |
-| Bank credits | 150, largest aggregating 59 settlement rows (a real N:1 join) |
+| Bank credits | 150, largest aggregating 72 settlement rows (a real N:1 join) |
 | Ledger rows | 1049 orders |
 | Injected troubles | 371 affected rows across 16 causes, ₹4.6L of true impact |
 | Malformed rows | 5, spread across batches 2, 4, 6, 8 and 9 |
@@ -508,7 +508,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      378 test functions, 410 cases
+tests/      379 test functions, 411 cases
 ```
 
 Four artifacts leave a run and all four are committed: `EXCEPTIONS.md` (what it could not
@@ -1331,6 +1331,62 @@ record rather than writing back to `data/resolutions.json`. The queue carries th
 sentence at the top rather than leaving a viewer to discover it. The paths behind those
 controls are real code and are driven by tests — `_apply_card_decisions` under accept,
 decline and defer, and `Rule.narrowed` including its refusal to widen a band.
+
+---
+
+## Deploying the dashboard
+
+The UI is a static build over one scored run, so any static host serves it.
+`ui/public/tallytrace.json` is committed for exactly this reason — a static host has no
+Python runtime to regenerate it with, and committing it is what keeps the deployed page
+and the committed `EXCEPTIONS.md` describing the same run.
+
+```bash
+cd ui && npm install && npm run build     # dist/ is the whole site
+```
+
+### The one live call, and what it is allowed to do
+
+Deployed, the **Ask** screen can answer a question that is not in the committed
+fixtures. `ui/api/ask.js` is a serverless function that does the same job as
+`pipeline/llm/intent.py` — map a question onto one registered metric, or decline — in
+Node, against Gemini, because a browser cannot run the Python one.
+
+**It is the same contract, not a new capability.** It chooses one id from the frozen
+ten-metric registry or declines; it never computes, never writes a query and never sees
+a row; and its response schema *cannot express a filter*, because the deployed build
+holds whole-corpus results only and a schema that cannot promise a filter cannot break
+one. Every rupee on screen still comes from the registry's own pure functions, computed
+by `make score` before the build. The three outcomes are validated server-side the way
+`MetricIntent` validates them in Python — a `refuse` that also names a metric is
+rejected rather than repaired, because on screen it would read as an answer.
+
+Fixtures are still tried first, so the eleven logged questions cost nothing and stay
+deterministic. Only an unasked question reaches the model, and the answer is labelled
+**mapped live by `<model>`** on screen wherever it happens.
+
+`tests/test_ui_data.py::test_the_deployed_intent_mapper_mirrors_the_python_registry`
+fails if that function's mirrored registry ever drifts from
+`pipeline/metrics/registry.py`, in ids or in supported groupings. A stale mirror would
+offer the model an id the registry cannot compute, and the failure would surface as a
+refusal that looks like honest behaviour.
+
+**None of the scored numbers depend on any of this.** `make demo` still runs
+`--offline` and still refuses the network with a key set; the corpus, the rules, the
+claims and the precision figures are all produced without it.
+
+### Configuration
+
+| Variable | Where | Effect |
+|---|---|---|
+| `GEMINI_API_KEY` | deployment environment, server-side only | enables the live mapper. Absent, `/api/ask` returns 501 and the UI falls back to the offline registry picker |
+| `GEMINI_MODEL` | optional | defaults to `gemini-2.5-flash` |
+
+**The key must never be given a `VITE_` prefix.** Anything so prefixed is compiled into
+the browser bundle and published with it. The function reads `process.env` on the
+server; the key is never sent to the page, and the Anthropic key field on **Report &
+Settings** is a separate, browser-only convenience for the CLI that this page still
+sends nowhere.
 
 ---
 

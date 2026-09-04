@@ -66,6 +66,7 @@ const OUTCOME = {
   clarify: { icon: HelpCircle, tone: 'border-amber/50 bg-amber-light/50', label: 'needs one answer' },
   refuse: { icon: Slash, tone: 'border-divider bg-gray-50', label: 'refused' },
   unasked: { icon: Search, tone: 'border-divider bg-gray-50', label: 'not in the fixtures' },
+  asking: { icon: Search, tone: 'border-divider bg-gray-50', label: 'mapping…' },
 }
 
 function Bubble({ from, children }) {
@@ -90,20 +91,27 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
     return <Bubble from="operator"><p className="text-sm">{turn.text}</p></Bubble>
   }
 
-  const meta = OUTCOME[turn.outcome] || OUTCOME.unasked
+  const asking = turn.state === 'asking'
+  const meta = asking ? OUTCOME.asking : OUTCOME[turn.outcome] || OUTCOME.unasked
   const Icon = meta.icon
 
   return (
     <Bubble from="system">
       <div className="flex items-center gap-2 mb-1.5">
-        <Icon size={14} className="text-muted" />
+        <Icon size={14} className={`text-muted ${asking ? 'animate-pulse' : ''}`} />
         <StatusBadge variant={
-          turn.outcome === 'mapped' ? 'success' : turn.outcome === 'clarify' ? 'amber' : 'muted'
+          asking ? 'muted'
+            : turn.outcome === 'mapped' ? 'success' : turn.outcome === 'clarify' ? 'amber' : 'muted'
         }>
           {meta.label}
         </StatusBadge>
         {turn.metricId && (
           <span className="font-mono text-[11px] text-muted">{turn.metricId}</span>
+        )}
+        {/* Said out loud, because it is the one answer on this screen that did not come
+            out of the committed fixtures. */}
+        {turn.live && (
+          <span className="font-mono text-[11px] text-muted">· mapped live by {turn.live}</span>
         )}
       </div>
 
@@ -135,7 +143,7 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
           metric from the registry" without showing the registry, which left a new
           question with nowhere to go — the single most common way to conclude this
           screen does not answer anything. */}
-      {(turn.outcome === 'clarify' || turn.outcome === 'unasked') && turn.state !== 'answered' && (
+      {turn.registry && turn.state !== 'answered' && (
         <div className="mt-3 border-t border-divider pt-3">
           <p className="text-xs text-muted mb-2">
             {turn.outcome === 'clarify'
@@ -265,6 +273,76 @@ export default function Ask({ data }) {
     return id
   }
 
+  const amend = (id, patch) =>
+    setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+
+  // The offline ending, used whenever there is no live mapper to reach: a deployment
+  // with no key, a static build, or a call that failed. It is the honest default —
+  // this page replays a completed run — and the registry picker gives the question
+  // somewhere to go.
+  const offline = (id, lead) =>
+    amend(id, {
+      state: 'idle',
+      text: `${lead} This page replays a completed run, so it answers what has already ` +
+        'been asked. Pick a metric below to compute one now, offline.',
+      registry: reporting.registry,
+    })
+
+  // Ask the deployed mapper. It returns an id and a restatement — never a number.
+  // The lookup afterwards is this app reading a result the registry already computed,
+  // which is why the confirm step still means what it says.
+  const askLive = async (question, id) => {
+    let reply
+    try {
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question }),
+      })
+      if (response.status === 501 || response.status === 404) {
+        return offline(id, 'Not in this run’s fixtures, and this build has no live mapper.')
+      }
+      reply = await response.json()
+      if (!response.ok) {
+        return offline(id, `Not in this run’s fixtures. ${reply.error || 'The mapper failed.'}`)
+      }
+    } catch {
+      return offline(id, 'Not in this run’s fixtures, and the mapper could not be reached.')
+    }
+
+    if (reply.outcome === 'refuse') {
+      return amend(id, { outcome: 'refuse', state: 'idle', text: reply.refusal, registry: null })
+    }
+    if (reply.outcome === 'clarify') {
+      return amend(id, {
+        outcome: 'clarify',
+        state: 'idle',
+        text: reply.clarifying_question,
+        registry: reporting.registry,
+      })
+    }
+
+    const result = resultFor(reply.metric_id, reply.group_by)
+    if (!result) {
+      // The model named a real metric and a real grouping, and this build does not
+      // hold that pair. Say so rather than showing the nearest thing that does exist.
+      return offline(
+        id,
+        `Mapped to ${reply.metric_id} by ${reply.group_by}, which this build has not precomputed.`
+      )
+    }
+    amend(id, {
+      outcome: 'mapped',
+      state: 'awaiting',
+      metricId: reply.metric_id,
+      text: reply.restatement,
+      live: reply.model,
+      result: null,
+      pending: result,
+      registry: null,
+    })
+  }
+
   const submit = (text) => {
     const question = text.trim()
     if (!question) return undefined
@@ -275,15 +353,17 @@ export default function Ask({ data }) {
 
     const entry = asked[normalise(question)]
     if (!entry) {
-      return push({
+      // Fixtures first, always: they are free, deterministic, and they are what every
+      // scored number rests on. Only a question nobody has asked reaches the model,
+      // and only where a deployment has been given a key.
+      const id = push({
         from: 'system',
         outcome: 'unasked',
-        text:
-          'Not in this run\u2019s fixtures. This page replays a completed run offline, so it ' +
-          'answers only what has already been asked. Pick a metric below, or run `make ask` ' +
-          'with an API key to ask something new.',
-        registry: reporting.registry,
+        state: 'asking',
+        text: 'Not in this run\u2019s fixtures. Asking the model to map it onto the registry\u2026',
       })
+      askLive(question, id)
+      return id
     }
 
     if (entry.outcome === 'refuse') {
