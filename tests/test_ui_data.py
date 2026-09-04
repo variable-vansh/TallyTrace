@@ -18,6 +18,7 @@ from decimal import Decimal
 
 import pytest
 
+from harness.metrics import pct
 from harness.score import to_json
 from tools.build_ui_data import build, money
 
@@ -243,3 +244,83 @@ def test_every_logged_question_carries_what_the_ask_screen_needs(artifacts) -> N
             assert entry["clarifying_question"]
         else:
             assert entry["refusal"]
+
+
+def test_the_weekly_automation_split_partitions_the_batch_exactly(artifacts) -> None:
+    """The dashboard's three-way split is a real part-to-whole.
+
+    ``AutomationSplit`` draws auto-matched / AI-resolved / manual as one 100% bar,
+    both for the selected week and stacked per week. A part-to-whole is only honest
+    if the three add to every settlement row -- no residual quietly dropped, no row
+    counted in two slices -- and the component derives the manual slice by
+    subtraction, so this is the assertion that stops a subtraction that goes
+    negative or a total that does not close.
+    """
+    for week in artifacts[1]["weeks"]:
+        stats = week["stats"]
+        human = stats["flaggedForReview"] - stats["autoResolved"]
+        assert human >= 0, f"week {week['week']} resolved more rows than it flagged"
+        assert stats["autoMatched"] + stats["flaggedForReview"] == stats["totalTransactions"], (
+            f"week {week['week']} does not partition: "
+            f"{stats['autoMatched']} + {stats['flaggedForReview']} "
+            f"!= {stats['totalTransactions']}"
+        )
+        # The manual share of the bar is the review rate the hero figure shows.
+        assert pct(human, stats["totalTransactions"]) == D(str(stats["manualReviewRate"]))
+
+
+def test_the_threshold_control_is_backed_by_real_scored_runs(artifacts) -> None:
+    """The ceiling control in the UI offers numbers, so those numbers have to be measured.
+
+    ``tools/ceiling_sweep.py`` scores the whole corpus once per candidate ceiling and
+    writes the curve; the UI renders it and refuses to interpolate a ceiling that is not
+    on it. If the file is absent the control degrades to showing the ceiling in force,
+    which is why this skips rather than fails.
+    """
+    policy = artifacts[1]["autoResolutionPolicy"]
+    sweep = policy.get("scenarios")
+    if sweep is None:
+        pytest.skip("run `make ceilings` first")
+
+    assert sweep["configured_ceiling_inr"] == policy["default"]["max_variance_inr"]
+    ceilings = [D(s["ceiling_inr"]) for s in sweep["scenarios"]]
+    assert ceilings == sorted(ceilings), "the curve is rendered in order and must be stored in it"
+    assert D(policy["default"]["max_variance_inr"]) in ceilings, (
+        "the ceiling in force is not on the curve, so the control has nothing to compare to"
+    )
+
+
+def test_the_two_precision_series_agree_at_the_shipped_ceiling_and_only_there(artifacts) -> None:
+    """The finding the control exists to show, asserted rather than described.
+
+    Live precision is judged against the operator's own words; true precision against
+    the answer key. They agree at the shipped ceiling. They come apart as it rises,
+    because a rule and an operator can be wrong in the same direction and the bigger the
+    row, the more often they are — so a ceiling chosen on live precision alone rises
+    forever. If this ever stops being true the README's argument is wrong and the
+    control is recommending the wrong thing.
+    """
+    sweep = artifacts[1]["autoResolutionPolicy"].get("scenarios")
+    if sweep is None:
+        pytest.skip("run `make ceilings` first")
+
+    shipped = sweep["configured_ceiling_inr"]
+    by_ceiling = {s["ceiling_inr"]: s for s in sweep["scenarios"]}
+    assert D(by_ceiling[shipped]["precision_gap_pct"]) == D("0.00")
+
+    # The claim is a trend, not a step-by-step ordering: ₹900 sits a hundredth below
+    # ₹800 because a different rule fires there, and asserting strict monotonicity
+    # would make this test about that accident rather than about the finding.
+    above = [s for s in sweep["scenarios"] if D(s["ceiling_inr"]) > D(shipped)]
+    gaps = [D(s["precision_gap_pct"]) for s in above]
+    assert all(gap >= 0 for gap in gaps), (
+        f"true precision should never beat live precision above the ceiling: {gaps}"
+    )
+    assert gaps[-1] > D("5"), "the highest ceiling should show a large gap, or the point is lost"
+    assert gaps[-1] > gaps[0], f"the gap should be wider at the top of the range: {gaps}"
+
+    # And the thing the gap costs, stated in rows rather than in points.
+    shipped_wrong = by_ceiling[shipped]["wrong"]
+    assert above[-1]["wrong"] > shipped_wrong * 5, (
+        "the top of the range should close many more rows with the wrong cause"
+    )

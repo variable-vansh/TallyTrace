@@ -42,3 +42,55 @@ export const OUTCOME_VARIANT = {
 
 export const confidenceVariant = (score) =>
   score > 0.75 ? 'success' : score > 0.55 ? 'amber' : 'danger'
+
+// --------------------------------------------------------------------------- //
+// Dates. The corpus is a run of weekly settlement batches, so every date on
+// screen is either a day inside a week or the week itself.
+// --------------------------------------------------------------------------- //
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Parsed by hand rather than through `new Date(iso)`, which reads a bare ISO date as
+// UTC and renders it a day early anywhere west of Greenwich. A deadline that shows
+// the wrong day is the one bug this screen cannot have.
+export const parseISO = (iso) => {
+  const [y, m, d] = (iso || '').split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+
+export const isoOf = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+// Monday-first: an Indian working week starts there, and the weekend reads as a block.
+export const mondayIndex = (date) => (date.getDay() + 6) % 7
+
+export const startOfWeek = (iso) => {
+  const date = parseISO(iso)
+  date.setDate(date.getDate() - mondayIndex(date))
+  return date
+}
+
+export const addDays = (date, days) => {
+  const next = new Date(date)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+// "21–27 Jul 2025", and "28 Jul – 3 Aug 2025" when the week straddles a month. The
+// month and the year are said once where saying them twice would add nothing.
+export const dateSpan = (fromIso, toIso) => {
+  const from = parseISO(fromIso)
+  const to = parseISO(toIso)
+  const tail = `${MONTH_SHORT[to.getMonth()]} ${to.getFullYear()}`
+  if (from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear()) {
+    return `${from.getDate()}–${to.getDate()} ${tail}`
+  }
+  const head = `${from.getDate()} ${MONTH_SHORT[from.getMonth()]}`
+  return `${head} – ${to.getDate()} ${tail}`
+}
+
+export const dayMonth = (iso) => {
+  const date = parseISO(iso)
+  return `${date.getDate()} ${MONTH_SHORT[date.getMonth()]}`
+}

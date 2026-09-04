@@ -5,7 +5,7 @@
 seed: 20250106
 batch_count: 10
 batch_length_days: 7
-first_batch_start: 2025-01-06          # Monday
+first_batch_start: 2025-06-09          # Monday
 
 # Orders *settling* in each batch. Generation is driven from the settlement cycle
 # rather than the order date: a batch is a settlement report, so this is what

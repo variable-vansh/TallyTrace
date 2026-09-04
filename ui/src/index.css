@@ -35,3 +35,13 @@ body {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 2px;
 }
+
+/* Panel drawer motion. Transform and opacity only, so it composites. */
+@keyframes slideIn {
+  from { transform: translate3d(16px, 0, 0); opacity: 0; }
+  to   { transform: translate3d(0, 0, 0); opacity: 1; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

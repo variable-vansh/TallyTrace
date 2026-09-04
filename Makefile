@@ -3,7 +3,7 @@ PIP := .venv/bin/pip
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv generate verify-clean reconcile learn claims reporting ask llm-fixtures resolutions ui-data demo score test typecheck check clean
+.PHONY: help venv generate verify-clean reconcile learn claims reporting ask llm-fixtures resolutions ui-data demo score whatif ceilings test typecheck check clean
 
 help:  ## Show the available targets
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -45,6 +45,12 @@ ui-data:  ## Build the JSON the React UI reads
 
 score:  ## Score the pipeline against the answer key; writes EXCEPTIONS.md + data/score.json
 	$(PY) -m harness.score --offline
+
+whatif:  ## Score under a different ceiling without changing policy:  make whatif ceiling=3000
+	$(PY) -m harness.score --offline --max-variance-inr "$(ceiling)"
+
+ceilings:  ## Score every candidate ceiling and write the curve the threshold control reads
+	$(PY) -m tools.ceiling_sweep --offline
 
 demo: generate score ui-data  ## Everything, end to end, offline. Run it twice: the numbers do not move.
 

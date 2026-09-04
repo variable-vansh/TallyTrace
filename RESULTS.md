@@ -11,18 +11,18 @@ TALLYTRACE — SCORE REPORT
 THROUGHPUT
 ------------------------------------------------------------------------------
 batch   records   settle   seconds     rec/s    tokens     ₹/txn
-    1       244       59     0.017     14086     17127      0.16
-    2       184       75     0.018     10102     20939      0.16
-    3       195       87     0.024      8080     27078      0.18
-    4       225      102     0.026      8717     34007      0.21
-    5       240      114     0.031      7720     39869      0.22
-    6       269      128     0.025     10647     35580      0.16
-    7       301      141     0.028     10630     40671      0.18
-    8       283      155     0.032      8751     46199      0.19
-    9       245      168     0.034      7145     51980      0.20
-   10       223      181     0.038      5845     66345      0.24
+    1       244       59     0.018     13450     17127      0.16
+    2       184       75     0.019      9815     20939      0.16
+    3       195       87     0.024      8096     27078      0.18
+    4       225      102     0.026      8584     34007      0.21
+    5       240      114     0.032      7525     39869      0.22
+    6       269      128     0.026     10548     35580      0.16
+    7       301      141     0.029     10209     40671      0.18
+    8       283      155     0.033      8520     46199      0.19
+    9       245      168     0.035      6960     51980      0.20
+   10       223      181     0.039      5735     66345      0.24
 ------------------------------------------------------------------------------
-  all      2409     1210     0.275      8762    379795
+  all      2409     1210     0.281      8561    379795
        model claude-opus-5, rates from config/pricing.yaml.
        TOKEN COUNTS ARE ESTIMATED. Some cached answers were recorded from a
        transcript rather than metered by the API, so their token counts are
@@ -112,6 +112,13 @@ AUTO-RESOLUTION
 ------------------------------------------------------------------------------
        146 attempted, precision 98.63%
 
+AUTO-RESOLUTION POLICY — THE CEILINGS A RULE CANNOT OUT-CONFIDENCE
+------------------------------------------------------------------------------
+       default ceiling  ₹500.00   [config/thresholds.yaml]
+       no per-cause or per-channel ceilings set.
+       never auto-resolved, whatever a rule believes: chargeback_deduction, tcs_timing_mismatch, tds_timing_mismatch
+       always human, by resolution class: counterparty_claim, investigate, tax_review
+
 LEARNING LOOP — WHAT A RULE CLOSED, AND WHETHER IT WAS RIGHT
 ------------------------------------------------------------------------------
 batch  queue  auto  held   esc  precision  ₹ auto-resolved    ₹ escalated  learn  prom  ret  cards  touch  touch %
@@ -196,8 +203,8 @@ batch  opened  draft  filed  recov  exp      ₹ opened    ₹ recovered    ₹ 
     2       2      2      2      0    0       ₹717.48          ₹0.00        ₹0.00     4     ₹6583.69
     3       1      0      1      0    0        ₹19.51          ₹0.00        ₹0.00     5     ₹6603.20
     4       3      3      2      1    0      ₹6741.44        ₹287.97        ₹0.00     7    ₹13056.67
-    5       9      9      6      0    0     ₹16562.80          ₹0.00        ₹0.00    16    ₹29619.47
-    6       6      6      2      5    3     ₹13028.37      ₹11769.13     ₹5885.72    14    ₹24992.99
+    5       9      9      6      0    1     ₹16562.80          ₹0.00       ₹19.51    15    ₹29599.96
+    6       6      6      2      5    2     ₹13028.37      ₹11769.13     ₹5866.21    14    ₹24992.99
     7       8      7      6      6    1      ₹8933.37      ₹13028.37      ₹429.51    15    ₹20468.48
     8       9      9      7      4    0     ₹12564.46       ₹8363.13        ₹0.00    20    ₹24669.81
     9      12     12      6      3    3     ₹21829.21       ₹4123.63     ₹6741.44    26    ₹35633.95
@@ -290,7 +297,7 @@ REPORTING — WHAT THE REGISTRY ANSWERED, AND WHAT IT WOULD NOT
 PINNED METRICS — RECOMPUTED WITH NO MODEL IN THE LOOP
 ------------------------------------------------------------------------------
        Myntra take rate, week by week  [effective_take_rate by batch]
-           pinned by priya.n@demostore.in on 2025-03-16, from: "Is Myntra taking a bigger cut than it used to?"
+           pinned by priya.n@demostore.in on 2025-08-17, from: "Is Myntra taking a bigger cut than it used to?"
            batch 1           30.29%
            batch 2           30.49%
            batch 3           29.87%
@@ -303,7 +310,7 @@ PINNED METRICS — RECOMPUTED WITH NO MODEL IN THE LOOP
            batch 10          32.44%
 
        Effective take rate by channel  [effective_take_rate by channel]
-           pinned by priya.n@demostore.in on 2025-03-16, from: "What share of gross are the platforms keeping across the board?"
+           pinned by priya.n@demostore.in on 2025-08-17, from: "What share of gross are the platforms keeping across the board?"
            amazon            21.66%
            flipkart          18.95%
            myntra            29.92%
@@ -311,7 +318,7 @@ PINNED METRICS — RECOMPUTED WITH NO MODEL IN THE LOOP
            website            2.23%
 
        Exceptions by cause  [exception_count_by_cause by cause]
-           pinned by priya.n@demostore.in on 2025-03-16, from: "Which causes are generating the most exceptions?"
+           pinned by priya.n@demostore.in on 2025-08-17, from: "Which causes are generating the most exceptions?"
            commission_rate_stale                     129
            refund_timing_lag                          86
            rto_reversal_later_cycle                   54
@@ -333,7 +340,7 @@ PINNED METRICS — RECOMPUTED WITH NO MODEL IN THE LOOP
            tds_timing_mismatch                         1
 
        Manual review rate  [review_rate_trend by batch]
-           pinned by priya.n@demostore.in on 2025-03-16, from: "Is the manual review rate actually coming down?"
+           pinned by priya.n@demostore.in on 2025-08-17, from: "Is the manual review rate actually coming down?"
            batch 1           18.64%
            batch 2           22.67%
            batch 3           18.39%
@@ -346,7 +353,7 @@ PINNED METRICS — RECOMPUTED WITH NO MODEL IN THE LOOP
            batch 10          22.65%
 
        Open claim value  [open_claim_value by platform]
-           pinned by priya.n@demostore.in on 2025-03-16, from: "How much money are we still chasing, by platform?"
+           pinned by priya.n@demostore.in on 2025-08-17, from: "How much money are we still chasing, by platform?"
            amazon         ₹2,404.15
            flipkart       ₹5,754.15
            myntra         ₹1,686.76

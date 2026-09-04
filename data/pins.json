@@ -11,7 +11,7 @@
         "group_by": "batch"
       },
       "pinned_by": "priya.n@demostore.in",
-      "pinned_at": "2025-03-16",
+      "pinned_at": "2025-08-17",
       "source_question": "Is Myntra taking a bigger cut than it used to?"
     },
     {
@@ -25,7 +25,7 @@
         "group_by": "channel"
       },
       "pinned_by": "priya.n@demostore.in",
-      "pinned_at": "2025-03-16",
+      "pinned_at": "2025-08-17",
       "source_question": "What share of gross are the platforms keeping across the board?"
     },
     {
@@ -39,7 +39,7 @@
         "group_by": "cause"
       },
       "pinned_by": "priya.n@demostore.in",
-      "pinned_at": "2025-03-16",
+      "pinned_at": "2025-08-17",
       "source_question": "Which causes are generating the most exceptions?"
     },
     {
@@ -53,7 +53,7 @@
         "group_by": "batch"
       },
       "pinned_by": "priya.n@demostore.in",
-      "pinned_at": "2025-03-16",
+      "pinned_at": "2025-08-17",
       "source_question": "Is the manual review rate actually coming down?"
     },
     {
@@ -67,7 +67,7 @@
         "group_by": "platform"
       },
       "pinned_by": "priya.n@demostore.in",
-      "pinned_at": "2025-03-16",
+      "pinned_at": "2025-08-17",
       "source_question": "How much money are we still chasing, by platform?"
     }
   ]

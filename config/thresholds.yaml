@@ -13,7 +13,46 @@ matching:
     max_candidates: 60
 
 auto_resolution:
-  max_variance_inr: 500.00          # above this, never auto-resolve
+  # The default ceiling, in rupees of *error* -- not of order value. Above it, never
+  # auto-resolve. The business owns this number; nothing in the code may assume it.
+  #
+  # Held at 500.00 against a proposal to raise it to 1000.00. The live precision the
+  # product can see rises with the ceiling (98.63% -> 98.77%); the precision measured
+  # against the answer key falls (98.63% -> 95.68%), because the marginal rows are ones
+  # a rule and an operator get wrong in the same direction. `make ceilings` prints the
+  # whole curve. See FAILURES.md #40.
+  max_variance_inr: 500.00
+
+  # Ceilings the business sets per cause and per channel, because one number is a
+  # policy about the average case and there is no average case: a stale commission
+  # rate on a website order is a different risk from a four-figure clawback on a
+  # marketplace return.
+  #
+  #   - most specific match wins -- cause+channel beats cause or channel alone,
+  #     which beats the default. File order is never consulted;
+  #   - two equally specific ceilings that meet on one case (a cause and a channel,
+  #     say) resolve to the *lower* one: both are your policy, neither is aimed more
+  #     precisely, and a tie between risk thresholds goes to the stricter;
+  #   - one scope, one number. The same scope set twice is a load error;
+  #   - `max_variance_inr: 0.00` turns auto-resolution off for that scope entirely;
+  #   - every override is named in the score report, in the decision path of every
+  #     resolution it governs, and on the dashboard. A raised ceiling can be argued
+  #     about; it cannot be invisible.
+  #
+  # Ships empty, so the shipped numbers are the shipped policy. To set one, uncomment
+  # and edit -- `set_by` and `note` are recorded and shown beside the number:
+  #
+  #   max_variance_overrides:
+  #     - cause: commission_rate_stale
+  #       max_variance_inr: 1500.00
+  #       set_by: finance.head@demostore.in
+  #       note: A rate that moved is arithmetic we can check, not a dispute.
+  #     - channel: offline
+  #       max_variance_inr: 0.00
+  #       set_by: finance.head@demostore.in
+  #       note: Counter takings are counted by hand. Nothing here closes itself.
+  max_variance_overrides: []
+
   never_auto_resolve_causes:        # regardless of rule confidence
     - tcs_timing_mismatch
     - tds_timing_mismatch

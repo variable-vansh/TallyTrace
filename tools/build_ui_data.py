@@ -40,6 +40,21 @@ from pipeline.rules.resolutions import OperatorLog
 from pipeline.rules import resolutions as operator_log
 
 UI_JSON = REPO_ROOT / "ui" / "public" / "tallytrace.json"
+CEILING_SCENARIOS = REPO_ROOT / "data" / "ceiling_scenarios.json"
+
+
+def ceiling_scenarios() -> dict[str, Any] | None:
+    """The scored curve behind the threshold control, if ``make ceilings`` has run.
+
+    Optional rather than required: it costs ten full scoring passes and the rest of the
+    UI does not depend on it. Absent, the control shows the ceiling in force and says
+    which command produces the comparison — which is better than showing a slider whose
+    numbers were guessed in the browser.
+    """
+    if not CEILING_SCENARIOS.exists():
+        return None
+    payload: dict[str, Any] = json.loads(CEILING_SCENARIOS.read_text(encoding="utf-8"))
+    return payload
 
 
 def money(value: Decimal | str | None) -> float | None:
@@ -380,6 +395,14 @@ def build(score: Score) -> dict[str, Any]:
     return {
         "generatedFrom": "make score",
         "totals": totals(score),
+        # The policy the run was scored under, so the dashboard can name the ceiling
+        # in force rather than hardcode the one that shipped. A number typed into a
+        # React component is a number that goes stale the first time finance moves it.
+        "autoResolutionPolicy": {
+            **score.guardrails.to_json(),
+            "defaultCeilingInr": money(score.guardrails.default_ceiling.max_variance_inr),
+            "scenarios": ceiling_scenarios(),
+        },
         "model": score.pricing.model,
         "tokensEstimated": score.run.tokens_estimated,
         "weeks": [week(score, index, log, lookup) for index in range(len(score.results))],

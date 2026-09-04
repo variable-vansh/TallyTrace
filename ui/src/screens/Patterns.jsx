@@ -42,57 +42,66 @@ function Conditions({ rule }) {
   )
 }
 
+// A 2px rail rather than a coloured border. Thirty-one rules with a state fill each
+// reads as a warning board; a rail at the edge says the same thing quietly.
+const STATE_RAIL = {
+  active: 'bg-success',
+  shadow: 'bg-primary/60',
+  proposed: 'bg-divider',
+  retired: 'bg-danger/70',
+}
+
 function RuleRow({ rule }) {
   const [open, setOpen] = useState(false)
   const live = rule.precision === null ? null : Number(rule.precision) * 100
   const trueP = rule.true_precision_pct === null ? null : Number(rule.true_precision_pct)
   const drifted = live !== null && trueP !== null && Math.abs(live - trueP) > 0.01
+  const retired = rule.state === 'retired'
 
   return (
-    <div className={`bg-white rounded-2xl border overflow-hidden ${
-      rule.state === 'retired' ? 'border-danger/40' : 'border-divider'
-    }`}>
+    <div className="bg-white rounded-lg border border-divider overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left px-5 py-4 hover:bg-card-bg/50 transition-colors"
+        className="w-full text-left flex items-stretch hover:bg-card-bg/40 transition-colors"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <span className="font-mono text-sm font-bold text-gray-900">{rule.rule_id}</span>
-              <StatusBadge variant={RULE_STATE_VARIANT[rule.state]}>{rule.state}</StatusBadge>
-              <StatusBadge variant="muted">{humanise(rule.cause)}</StatusBadge>
-              <StatusBadge variant="blue">{humanise(rule.resolution_class)}</StatusBadge>
-              {!rule.enabled && <StatusBadge variant="danger">disabled</StatusBadge>}
-            </div>
-            <p className="text-sm text-gray-800 leading-snug pr-4">{rule.plain_words}</p>
-          </div>
-          <div className="flex items-center gap-6 flex-shrink-0 text-right">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted">Support</div>
-              <div className="text-sm font-bold text-gray-900">{rule.support}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted">Live precision</div>
-              <div className={`text-sm font-bold ${
-                live === null ? 'text-muted' : live < 75 ? 'text-danger' : 'text-gray-900'
-              }`}>
-                {live === null ? '—' : pct(live, 2)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted">Last fired</div>
-              <div className="text-sm font-bold text-gray-900">
-                {rule.last_fired_batch ? `Batch ${rule.last_fired_batch}` : '—'}
-              </div>
-            </div>
-            <ChevronDown size={16} className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
-          </div>
-        </div>
+        <span className={`w-[3px] flex-shrink-0 ${STATE_RAIL[rule.state] || 'bg-divider'}`} />
+        <span className="flex-1 min-w-0 flex items-center gap-4 px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="font-mono text-xs font-semibold text-gray-900">{rule.rule_id}</span>
+              <span className={`text-xs capitalize ${retired ? 'text-danger' : 'text-muted'}`}>
+                {rule.state}
+              </span>
+              {!rule.enabled && <span className="text-xs text-danger">· disabled</span>}
+            </span>
+            <span className="block text-sm text-gray-700 truncate mt-0.5">{rule.plain_words}</span>
+          </span>
+          <span className="hidden md:block text-right w-16 flex-shrink-0">
+            <span className="block text-[10px] uppercase tracking-widest text-muted">Fired</span>
+            <span className="block text-sm font-semibold text-gray-900 tabular-nums">{rule.support}</span>
+          </span>
+          <span className="hidden md:block text-right w-20 flex-shrink-0">
+            <span className="block text-[10px] uppercase tracking-widest text-muted">Precision</span>
+            <span className={`block text-sm font-semibold tabular-nums ${
+              live === null ? 'text-muted' : live < 75 ? 'text-danger' : 'text-gray-900'
+            }`}>
+              {live === null ? '—' : pct(live, 0)}
+            </span>
+          </span>
+          <ChevronDown size={15} className={`text-muted flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
       </button>
 
       {open && (
         <div className="px-5 pb-5 border-t border-divider pt-4 flex flex-col gap-4">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <StatusBadge variant={RULE_STATE_VARIANT[rule.state]}>{rule.state}</StatusBadge>
+            <StatusBadge variant="muted">{humanise(rule.cause)}</StatusBadge>
+            <StatusBadge variant="blue">{humanise(rule.resolution_class)}</StatusBadge>
+            <span className="text-xs text-muted ml-1">
+              {rule.last_fired_batch ? `last fired in batch ${rule.last_fired_batch}` : 'never fired'}
+            </span>
+          </div>
           <p className="text-xs text-muted italic">{STATE_BLURB[rule.state]}</p>
 
           <div>
@@ -224,28 +233,34 @@ export default function Patterns({ data }) {
         </div>
       </div>
 
-      {retired.length > 0 && (
-        <div className="bg-danger-light/40 border border-danger/25 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingDown size={16} className="text-danger" />
-            <h2 className="text-sm font-bold text-gray-900">
-              {retired.length} rule{retired.length === 1 ? '' : 's'} retired themselves
-            </h2>
-          </div>
-          {retired.map((r) => (
-            <p key={r.rule_id} className="text-sm text-gray-700 leading-relaxed">
-              <span className="font-mono font-semibold">{r.rule_id}</span> —{' '}
-              {r.transitions[r.transitions.length - 1]?.reason}. It was induced from a note that
-              generalised across every channel; the operator&rsquo;s own later resolutions
-              contradicted it, and the lifecycle demoted it without anyone intervening.
-            </p>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
         {shown.map((rule) => <RuleRow key={rule.rule_id} rule={rule} />)}
       </div>
+
+      {/* Retirement is evidence that the lifecycle works, so it stays visible — but as
+          a footnote under the list rather than as a red banner over it. A rule that
+          demoted itself six batches ago is not today's news, and putting it at the top
+          in alarm colours made a working mechanism look like an incident. */}
+      {retired.length > 0 && stateFilter !== 'retired' && (
+        <div className="flex items-start gap-2.5 text-xs text-muted border-t border-divider pt-4">
+          <TrendingDown size={14} className="mt-0.5 flex-shrink-0" />
+          <p className="leading-relaxed">
+            {retired.map((r) => (
+              <span key={r.rule_id}>
+                <button
+                  onClick={() => setStateFilter('retired')}
+                  className="font-mono font-semibold text-gray-700 hover:text-primary"
+                >
+                  {r.rule_id}
+                </button>
+                {' '}retired itself — {r.transitions[r.transitions.length - 1]?.reason}.{' '}
+              </span>
+            ))}
+            No one intervened: the operator&rsquo;s own later resolutions contradicted it and
+            the lifecycle demoted it. Kept in the list rather than deleted.
+          </p>
+        </div>
+      )}
 
       {shown.length === 0 && (
         <div className="bg-white rounded-2xl border border-divider p-12 text-center text-muted">

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  BookOpen, CheckCircle2, CornerDownLeft, HelpCircle, Pin, PinOff, Search, Slash,
+  ArrowDown, ArrowUp, BookOpen, CheckCircle2, CornerDownLeft, HelpCircle,
+  MessageSquareText, Pin, PinOff, Search, Slash,
 } from 'lucide-react'
 import MetricChart from '../components/MetricChart'
 import StatusBadge from '../components/StatusBadge'
+import { useStored } from '../lib/useStored'
 
 // Two things live on this screen, and the split is the product.
 //
@@ -31,6 +33,34 @@ const linkedQuestion = () => {
   return asked ? { question: decodeURIComponent(asked), confirmed: params.get('yes') === '1' } : null
 }
 
+// The screen opens on a worked example rather than on an empty box. What is worth
+// seeing here is the *procedure* — what was asked, what the system understood it to
+// mean, and what it then computed — and an empty chat shows none of it. The example is
+// read out of the committed question log, so it is a real exchange from this run
+// rather than a mock-up, and it clears on the first thing you type.
+const DEMO_QUESTION = 'How much money are we still chasing, by platform?'
+
+const demoTurns = (reporting) => {
+  const asked = reporting.questions || []
+  const entry = asked.find((q) => q.question === DEMO_QUESTION && q.result)
+    || asked.find((q) => q.outcome === 'mapped' && q.result)
+  if (!entry) return []
+  return [
+    { id: -2, demo: true, from: 'operator', text: entry.question },
+    {
+      id: -1,
+      demo: true,
+      from: 'system',
+      outcome: 'mapped',
+      state: 'computed',
+      metricId: entry.metric_id,
+      text: entry.restatement,
+      result: entry.result,
+      pending: entry.result,
+    },
+  ]
+}
+
 const OUTCOME = {
   mapped: { icon: CheckCircle2, tone: 'border-success/40 bg-success-light/40', label: 'mapped' },
   clarify: { icon: HelpCircle, tone: 'border-amber/50 bg-amber-light/50', label: 'needs one answer' },
@@ -43,7 +73,7 @@ function Bubble({ from, children }) {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[92%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[85%] rounded-2xl px-4 py-3 ${
           mine
             ? 'bg-gray-900 text-white rounded-br-sm'
             : 'bg-white border border-divider text-gray-900 rounded-bl-sm'
@@ -93,21 +123,24 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
           >
             Not what I meant
           </button>
-          <span className="text-[11px] text-muted">nothing has been computed yet</span>
+          <span className="text-[11px] text-muted">nothing computed yet</span>
         </div>
       )}
 
       {turn.state === 'declined' && (
-        <p className="text-xs text-muted mt-2">
-          Nothing was computed. Rephrase, or pick the metric you meant from the registry.
-        </p>
+        <p className="text-xs text-muted mt-2">Nothing was computed. Rephrase, or pick a metric.</p>
       )}
 
-      {turn.outcome === 'clarify' && turn.state !== 'answered' && (
+      {/* Offered on `unasked` as well as `clarify`. The refusal used to end in "pick a
+          metric from the registry" without showing the registry, which left a new
+          question with nowhere to go — the single most common way to conclude this
+          screen does not answer anything. */}
+      {(turn.outcome === 'clarify' || turn.outcome === 'unasked') && turn.state !== 'answered' && (
         <div className="mt-3 border-t border-divider pt-3">
           <p className="text-xs text-muted mb-2">
-            Answer it by naming the metric you meant. The model asked the question; the
-            registry is the vocabulary, and picking from it needs no second model call.
+            {turn.outcome === 'clarify'
+              ? 'Name the metric you meant — picking from the registry needs no second model call.'
+              : 'Everything this run can compute. Picking one answers it now, offline.'}
           </p>
           <RegistryPicker registry={turn.registry} onPick={(id) => onPick(turn.id, id)} />
         </div>
@@ -124,7 +157,7 @@ function Turn({ turn, onConfirm, onDecline, onPick, onPin, pinned }) {
           <MetricChart result={turn.result} height={200} />
           <div className="flex items-center justify-between gap-2 mt-2">
             <span className="text-[11px] text-muted">
-              Computed by the registry. No model was involved past the mapping above.
+              Computed by the registry — no model past the mapping above.
             </span>
             <button
               onClick={() => onPin(turn)}
@@ -162,30 +195,37 @@ function RegistryPicker({ registry, onPick }) {
   )
 }
 
-function PinnedCard({ name, result, meta }) {
+function PinnedCard({ name, result, meta, onUnpin, onMove, first, last }) {
   return (
     <div className="bg-white rounded-2xl border border-divider p-5">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-gray-900">{name}</h3>
-        {meta.session && <StatusBadge variant="blue">this session</StatusBadge>}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {meta.session && <StatusBadge variant="blue">this session</StatusBadge>}
+          {/* Buttons rather than drag: a board of five cards is reordered in one
+              click per step, and it works from a keyboard. */}
+          <button onClick={() => onMove(-1)} disabled={first} aria-label="Move up"
+                  className="p-1 rounded text-muted hover:text-gray-900 hover:bg-card-bg disabled:opacity-30 disabled:hover:bg-transparent">
+            <ArrowUp size={13} />
+          </button>
+          <button onClick={() => onMove(1)} disabled={last} aria-label="Move down"
+                  className="p-1 rounded text-muted hover:text-gray-900 hover:bg-card-bg disabled:opacity-30 disabled:hover:bg-transparent">
+            <ArrowDown size={13} />
+          </button>
+          <button onClick={onUnpin} aria-label="Unpin"
+                  className="p-1 rounded text-muted hover:text-danger hover:bg-card-bg">
+            <PinOff size={13} />
+          </button>
+        </div>
       </div>
       <p className="text-[11px] text-muted mb-2 font-mono">
         {result.metric_id} by {result.group_by}
       </p>
       <MetricChart result={result} height={170} />
-      <p className="text-[11px] text-muted mt-2 leading-relaxed border-t border-divider pt-2">
-        {meta.session ? (
-          <>
-            Previewed here only. <span className="font-mono">make reporting</span> writes the
-            definition to <span className="font-mono">data/pins.json</span>; this page renders a
-            completed run and has no server to write back to.
-          </>
-        ) : (
-          <>
-            Pinned by {meta.pinned_by} on {meta.pinned_at}, from “{meta.source_question}”.
-            Stored as an id and its parameters — never a number.
-          </>
-        )}
+      <p className="text-[11px] text-muted mt-2 border-t border-divider pt-2">
+        {meta.session
+          ? 'Previewed here only — make reporting writes the definition to data/pins.json.'
+          : `Pinned by ${meta.pinned_by} on ${meta.pinned_at}.`}
       </p>
     </div>
   )
@@ -193,9 +233,18 @@ function PinnedCard({ name, result, meta }) {
 
 export default function Ask({ data }) {
   const reporting = data.reporting || { questions: [], pins: [], registry: [], results: {} }
-  const [turns, setTurns] = useState([])
+  const [turns, setTurns] = useState(() =>
+    (linkedQuestion() ? [] : demoTurns(data.reporting || {})))
   const [draft, setDraft] = useState('')
   const [sessionPins, setSessionPins] = useState([])
+  const [panel, setPanel] = useState('ask')
+  // The board's arrangement is a per-viewer preference, so it lives in the browser.
+  // `data/pins.json` is the committed definition of what a pin *is* — an id and its
+  // parameters — and a rebuild must not be able to reshuffle somebody's board, nor a
+  // reshuffle rewrite the run. Removing a card here hides it; `make reporting` is
+  // still what changes the pins themselves.
+  const [order, setOrder] = useStored('tallytrace.pinOrder', [])
+  const [hidden, setHidden] = useStored('tallytrace.pinsHidden', [])
   const nextId = useRef(0)
 
   const asked = useMemo(() => {
@@ -220,6 +269,8 @@ export default function Ask({ data }) {
     const question = text.trim()
     if (!question) return undefined
     setDraft('')
+    // The example is a demonstration, not history. The first real question replaces it.
+    setTurns((prev) => prev.filter((turn) => !turn.demo))
     push({ from: 'operator', text: question })
 
     const entry = asked[normalise(question)]
@@ -228,10 +279,9 @@ export default function Ask({ data }) {
         from: 'system',
         outcome: 'unasked',
         text:
-          'I have not been asked this one. This page renders a completed run and the model ' +
-          'responses are read from committed fixtures, so it answers the questions in the ' +
-          'log below and nothing else. Pick a metric from the registry, or run ' +
-          '`make ask` with an API key to ask something new.',
+          'Not in this run\u2019s fixtures. This page replays a completed run offline, so it ' +
+          'answers only what has already been asked. Pick a metric below, or run `make ask` ' +
+          'with an API key to ask something new.',
         registry: reporting.registry,
       })
     }
@@ -308,40 +358,98 @@ export default function Ask({ data }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // True only while nothing but the seeded example is on screen.
+  const showingDemo = turns.length > 0 && turns.every((turn) => turn.demo)
+
   const isPinned = (turn) =>
     turn.result &&
     sessionPins.some((p) => p.key === `${turn.result.metric_id}|${turn.result.group_by}`)
 
+  // One list of cards, in the viewer's order, session pins first until they are moved.
+  const cards = useMemo(() => {
+    const all = [
+      ...sessionPins.map((entry) => ({
+        id: entry.key, name: entry.name, result: entry.result, meta: { session: true },
+      })),
+      ...reporting.pins.map((pinned) => ({
+        id: pinned.pin_id, name: pinned.name, result: pinned.result, meta: pinned,
+      })),
+    ].filter((card) => !hidden.includes(card.id))
+    const rank = (card) => {
+      const at = order.indexOf(card.id)
+      return at === -1 ? Number.MAX_SAFE_INTEGER : at
+    }
+    return [...all].sort((a, b) => rank(a) - rank(b))
+  }, [sessionPins, reporting.pins, order, hidden])
+
+  const move = (id, delta) => {
+    const ids = cards.map((c) => c.id)
+    const at = ids.indexOf(id)
+    const to = at + delta
+    if (at < 0 || to < 0 || to >= ids.length) return
+    ids.splice(to, 0, ids.splice(at, 1)[0])
+    setOrder(ids)
+  }
+
+  const unpin = (id) => setHidden([...hidden, id])
+
   return (
     <div className="flex flex-col gap-5">
-      <div>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold text-gray-900">Ask</h1>
-        <p className="text-sm text-gray-700 mt-1">
-          Describe the metric you want in your own words. The model maps it onto one of{' '}
-          {reporting.registry.length} registered metrics and states what it is about to
-          compute; nothing runs until you accept that sentence.
-        </p>
-        <p className="text-xs text-muted mt-1">
-          No SQL is generated anywhere. Enterprise text-to-SQL execution accuracy runs roughly
-          21–39% on realistic schemas and its failures are silent — a valid query returns a
-          plausible wrong number. A closed registry can only pick the wrong id out of{' '}
-          {reporting.registry.length}, and you see that choice before it runs. The limit is the
-          feature.
+        <div className="flex items-center gap-1 bg-white border border-divider rounded-lg p-1">
+          {[
+            { id: 'ask', label: 'Ask', icon: MessageSquareText, count: null },
+            { id: 'pinned', label: 'Pinned', icon: Pin, count: cards.length },
+          ].map(({ id, label, icon: Icon, count }) => (
+            <button
+              key={id}
+              onClick={() => setPanel(id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                panel === id ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Icon size={13} /> {label}
+              {count !== null && (
+                <span className={panel === id ? 'text-white/60' : 'text-muted'}>{count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className={panel === 'ask' ? '' : 'hidden'}>
+        <p className="text-sm text-gray-600">
+          Ask anything about the books. The answer is pulled from the reconciled data, and
+          you see what it is about to compute before it runs.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start">
-        {/* ---- talk to the books ------------------------------------------- */}
-        <div className="xl:col-span-3 flex flex-col gap-3">
+      {/* Two panels, switched rather than side by side. The chat needs the width to be
+          readable and the board needs it to be legible, and neither got it when they
+          shared a row. */}
+      <div className={panel === 'ask' ? 'flex flex-col gap-3' : 'hidden'}>
+        <div className="flex flex-col gap-3">
           <div className="bg-[#f2f4f7] rounded-2xl border border-divider p-5 flex flex-col gap-3 min-h-[420px]">
+            {showingDemo && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted">
+                  An example, from a question already put to this run.
+                </span>
+                <button
+                  onClick={() => setTurns([])}
+                  className="text-[11px] font-medium text-primary hover:text-primary-hover"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
             {turns.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-10">
                 <BookOpen size={26} className="text-muted mb-3" />
                 <p className="text-sm font-medium text-gray-900">Talk to the books</p>
-                <p className="text-xs text-muted mt-1 max-w-md">
-                  Ask about revenue, the take rate, the exception mix, the review rate or the
-                  claims register. Two of the questions below are refused and one is answered
-                  with a question — those are the interesting ones.
+                <p className="text-xs text-muted mt-1 max-w-sm">
+                  Revenue, take rate, the exception mix, the review rate, the claims register.
                 </p>
               </div>
             ) : (
@@ -377,62 +485,50 @@ export default function Ask({ data }) {
             </button>
           </form>
 
-          <div>
-            <p className="text-xs text-muted mb-1.5">
-              Asked before — the operator’s own log, replayed through the mapping on every run:
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {reporting.questions.map((entry) => (
-                <button
-                  key={entry.question}
-                  onClick={() => submit(entry.question)}
-                  title={
-                    entry.outcome === 'mapped'
-                      ? 'maps to a registered metric'
-                      : entry.outcome === 'clarify'
-                        ? 'answered with one clarifying question'
-                        : 'refused — nothing in the registry answers it'
-                  }
-                  className={`text-[11px] rounded-full px-2.5 py-1 border transition-colors hover:bg-white ${
-                    entry.outcome === 'mapped'
-                      ? 'border-divider text-gray-700'
-                      : entry.outcome === 'clarify'
-                        ? 'border-amber/60 text-amber-700 bg-amber-light/40'
-                        : 'border-danger/40 text-danger bg-danger-light/30 line-through decoration-danger/40'
-                  }`}
-                >
-                  {entry.question}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
+      </div>
 
-        {/* ---- what has been kept ------------------------------------------ */}
-        <div className="xl:col-span-2 flex flex-col gap-4">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide">
-              Pinned
-            </h2>
-            <span className="text-xs text-muted">
-              {reporting.pins.length + sessionPins.length} kept
-            </span>
-          </div>
-          <p className="text-xs text-muted -mt-2 leading-relaxed">
-            The model is present at the moment of definition and absent from every run
-            afterwards. A pin stores a metric id and its parameters, so these recompute from
-            the reconciled data every batch with nothing in the loop.
+      {/* ---- what has been kept ------------------------------------------ */}
+      <div className={panel === 'pinned' ? 'flex flex-col gap-4' : 'hidden'}>
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <p className="text-xs text-muted max-w-2xl">
+            A pin stores a metric id and its parameters, never a number — so these recompute
+            from the reconciled data every batch, with no model in the loop.
           </p>
-
-          {sessionPins.map((entry) => (
-            <PinnedCard key={entry.key} name={entry.name} result={entry.result}
-                        meta={{ session: true }} />
-          ))}
-          {reporting.pins.map((pinned) => (
-            <PinnedCard key={pinned.pin_id} name={pinned.name} result={pinned.result}
-                        meta={pinned} />
-          ))}
+          {hidden.length > 0 && (
+            <button
+              onClick={() => setHidden([])}
+              className="text-xs font-medium text-primary hover:text-primary-hover"
+            >
+              Restore {hidden.length} unpinned
+            </button>
+          )}
         </div>
+
+        {cards.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-divider p-12 text-center">
+            <Pin size={24} className="mx-auto mb-3 text-muted/40" />
+            <p className="text-sm text-gray-900 font-medium">Nothing pinned</p>
+            <p className="text-xs text-muted mt-1">
+              Ask something, accept the restatement, then pin the result.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            {cards.map((card, i) => (
+              <PinnedCard
+                key={card.id}
+                name={card.name}
+                result={card.result}
+                meta={card.meta}
+                first={i === 0}
+                last={i === cards.length - 1}
+                onMove={(delta) => move(card.id, delta)}
+                onUnpin={() => unpin(card.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

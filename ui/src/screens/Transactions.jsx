@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, Search, X } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
 import DecisionPath from '../components/DecisionPath'
+import PanelDrawer from '../components/PanelDrawer'
 import { inr, humanise } from '../lib/format'
 
 const STATUS_VARIANT = {
@@ -34,31 +35,6 @@ function FilterPill({ label, value, options, onChange }) {
         ))}
       </select>
       <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
-    </div>
-  )
-}
-
-// Clicking any row opens its decision path. That is the whole point of the screen:
-// every number on it can be traced back to the check that produced it.
-function Drawer({ exc, onClose }) {
-  if (!exc) return null
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <aside className="relative z-50 w-full max-w-2xl bg-[#f9fafb] h-full overflow-y-auto shadow-2xl">
-        <div className="sticky top-0 bg-white border-b border-divider px-6 py-4 flex items-center justify-between">
-          <div>
-            <div className="font-mono text-sm font-bold text-gray-900">{exc.key}</div>
-            <div className="text-xs text-muted">Decision path · batch {exc.batch}</div>
-          </div>
-          <button onClick={onClose} className="text-muted hover:text-gray-900 p-1">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="p-6">
-          <DecisionPath exc={exc} />
-        </div>
-      </aside>
     </div>
   )
 }
@@ -264,7 +240,16 @@ export default function Transactions({ weekData }) {
         <div className="overflow-x-auto">{table()}</div>
       </div>
 
-      <Drawer exc={selected} onClose={() => setSelected(null)} />
+      {/* Clicking any flagged row opens its decision path — the whole point of the
+          screen is that every number on it traces back to the check that produced it. */}
+      <PanelDrawer
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        title={selected?.key}
+        subtitle={selected ? `Decision path · batch ${selected.batch}` : ''}
+      >
+        <div className="p-6">{selected && <DecisionPath exc={selected} />}</div>
+      </PanelDrawer>
     </div>
   )
 }

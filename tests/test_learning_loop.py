@@ -128,14 +128,18 @@ def test_no_cause_on_the_never_auto_resolve_list_was_ever_auto_resolved(scored) 
 
 
 def test_the_rupee_ceiling_was_never_crossed(scored) -> None:
-    ceiling = guardrail_config_from(thresholds()).max_variance_inr
+    """Every auto-resolution is under the ceiling that governed *it* -- the scoped one
+    where the business set one, the default everywhere else. Checking against the
+    default alone would pass a run that quietly closed a row under a raised ceiling."""
+    policy = guardrail_config_from(thresholds())
     over = [
-        (d.case.case_id, d.case.features.variance_inr)
+        (d.case.case_id, d.case.features.variance_inr, ceiling.describe())
         for b in scored.run.batches
         for d in b.auto_resolved
-        if d.case.features.variance_inr > ceiling
+        for ceiling in [policy.ceiling_for(d.rule, d.case.features)]
+        if d.rule is not None and d.case.features.variance_inr > ceiling.max_variance_inr
     ]
-    assert over == [], f"auto-resolved above the ₹{ceiling} ceiling: {over}"
+    assert over == [], f"auto-resolved above the governing ceiling: {over}"
 
 
 def test_the_system_automates_volume_and_escalates_value(scored) -> None:

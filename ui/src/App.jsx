@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import './index.css'
-import BatchSelector from './components/BatchSelector'
+import WeekSelector from './components/WeekSelector'
 import Sidebar from './components/Sidebar'
 import Dashboard from './screens/Dashboard'
 import ReviewQueue from './screens/ReviewQueue'
@@ -43,14 +43,36 @@ const screenFromHash = () => {
   return name in SCREENS ? name : 'dashboard'
 }
 
+// `#review?week=6` opens a screen on a named batch. The week is app-level state rather
+// than a screen's own, but it belongs in the link for the same reason the screen does:
+// every claim made about this run is made about a particular batch, and "the review
+// queue in batch six" should be one URL rather than a click someone has to be told to
+// make. Returns a 0-indexed week, or null for "wherever the app would have opened".
+const weekFromHash = () => {
+  const query = window.location.hash.split('?')[1]
+  if (!query) return null
+  const asked = Number(new URLSearchParams(query).get('week'))
+  return Number.isInteger(asked) && asked > 0 ? asked - 1 : null
+}
+
 export default function App() {
   const [activeScreen, setActiveScreen] = useState(screenFromHash)
-  const [selectedWeek, setSelectedWeek] = useState(0) // 0-indexed
+  // null means "the latest batch", resolved below once the run has loaded. The default
+  // is the last week rather than the first because that is the week whose books are
+  // being closed; batch 1 is the state before anything has been learned, and opening
+  // there shows the tool at its least useful and least representative.
+  const [selectedWeek, setSelectedWeek] = useState(weekFromHash) // 0-indexed, or null
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    const onHashChange = () => setActiveScreen(screenFromHash())
+    const onHashChange = () => {
+      setActiveScreen(screenFromHash())
+      // A hash naming no week leaves the current one alone: navigating from the queue
+      // to the claims list is not a request to change which week you are reading.
+      const asked = weekFromHash()
+      if (asked !== null) setSelectedWeek(asked)
+    }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
@@ -75,28 +97,28 @@ export default function App() {
   }, [])
 
   const weeks = data?.weeks || []
-  const currentWeek = weeks[selectedWeek]
+  // Clamped rather than trusted: `#dashboard?week=99` should open the last batch, not
+  // an empty screen, and the run decides how many batches there are.
+  const weekIndex = Math.min(selectedWeek ?? weeks.length - 1, weeks.length - 1)
+  const currentWeek = weeks[weekIndex]
   const ActiveComponent = SCREENS[activeScreen]
 
   return (
     <div className="h-screen flex flex-col bg-nav text-white overflow-hidden">
-      {/* Top Nav */}
+      {/* Top Nav: who this is on the left, which week you are looking at on the
+          right. Every date on every screen below sits inside that week, so the
+          week is named once, up here, rather than repeated on each screen. */}
       <header className="h-16 bg-nav flex items-center justify-between px-6 flex-shrink-0 z-20 relative">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <rect width="28" height="28" rx="6" fill="#3D4FE0"/>
-              <path d="M7 14h14M14 7v14M9 9l10 10M19 9L9 19" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/>
-              <path d="M8 10l4 8 4-5 4 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="text-white font-semibold text-lg tracking-tight">TallyTrace</span>
-          </div>
-          <span className="text-white/50 text-xs ml-1 hidden sm:inline">Reconciliation Agent</span>
-        </div>
+        <button
+          onClick={() => navigate('dashboard')}
+          className="flex items-baseline gap-2 rounded-lg px-1 py-1 -ml-1 hover:bg-white/5 transition-colors"
+        >
+          <span className="text-[17px] font-bold tracking-tight text-white">TallyTrace</span>
+        </button>
 
-        <BatchSelector
+        <WeekSelector
           weeks={weeks}
-          selectedWeek={selectedWeek}
+          selectedWeek={weekIndex}
           onSelectWeek={setSelectedWeek}
         />
       </header>
@@ -105,8 +127,14 @@ export default function App() {
         <Sidebar activeScreen={activeScreen} onNavigate={navigate} />
 
         {/* Content Area - Dark margin on right and bottom, rounded corners */}
+        {/* The content panel is its own positioning context and clips to its own
+            rounded corners. Drawers portal into #panel-overlay below rather than
+            covering the viewport, so a side panel opened from a table stays inside
+            the panel it was opened from and the nav stays reachable behind it. */}
         <main className="flex-1 flex overflow-hidden pr-6 pb-6 pt-0">
-          <div className="flex-1 overflow-y-auto bg-[#f9fafb] rounded-[24px] text-gray-900 relative shadow-2xl">
+          <div className="flex-1 relative bg-[#f9fafb] rounded-[24px] text-gray-900 shadow-2xl overflow-hidden">
+            <div id="panel-overlay" className="absolute inset-0 z-40 pointer-events-none empty:hidden" />
+            <div className="absolute inset-0 overflow-y-auto">
             <div className="p-8 max-w-[1400px] min-h-full">
               {error ? (
                 <Placeholder
@@ -119,7 +147,8 @@ export default function App() {
                 <ActiveComponent
                   weekData={currentWeek}
                   allWeeks={weeks}
-                  selectedWeek={selectedWeek}
+                  selectedWeek={weekIndex}
+                  onSelectWeek={setSelectedWeek}
                   data={data}
                 />
               ) : (
@@ -128,6 +157,7 @@ export default function App() {
                   body="Run `make demo` to generate the corpus and score it."
                 />
               )}
+            </div>
             </div>
           </div>
         </main>

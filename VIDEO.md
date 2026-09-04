@@ -72,7 +72,7 @@ recording, so that the claim made in beat 1 has been checked that morning.
 
 ## Beat 3 — the loop running on one batch *(1:30 – 2:30)*
 
-**On screen:** `make learn`, then the UI review queue on batch 6.
+**On screen:** `make learn`, then the UI review queue on batch 6 — `#review?week=6`.
 
 > Batch six. Forty-one exceptions in the queue. Nineteen of them close without a human,
 > worth nine hundred and seventy-seven rupees; twenty-two escalate, worth forty-three
@@ -123,7 +123,7 @@ for the decision path.
 > discrepancy has to be raised before the tenth of the following month or the GSTR-8
 > correction misses its return — that is a calendar date, not a duration, and it is
 > handled separately for that reason. Claim five is that case: nineteen rupees fifty-one,
-> expired on the tenth of February.
+> expired on the tenth of July.
 >
 > And this is the part I care about. Claim three, order eight one, Flipkart, two hundred
 > and eighty-seven rupees ninety-seven. Opened in batch two. Drafted. Filed, by a
@@ -138,7 +138,8 @@ for the decision path.
 
 ## Beat 6 — the system getting one wrong, and the guardrail catching it *(4:15 – 4:45)*
 
-**On screen:** the UI rules page, R-07 in red.
+**On screen:** the UI rules page at `#patterns`, the retired footnote clicked to filter
+to R-07.
 
 > Rule seven. Induced in batch two from a note that said late claw-backs are returns
 > coming back, which is true on Flipkart and false on Amazon. It predicted on six late

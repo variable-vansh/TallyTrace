@@ -35,7 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass, field, replace
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable
 
@@ -66,7 +66,7 @@ from pipeline.matcher import BatchResult, Bucket, MatchConfig, match_config_from
 from pipeline.rules import resolutions as resolution_log
 from pipeline.rules import store as rule_store
 from pipeline.rules.apply import AUTO_RESOLVED, SHADOWED, Decision, decide
-from pipeline.rules.guardrails import guardrail_config_from
+from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
 from pipeline.rules.lifecycle import advance, lifecycle_config_from
 from pipeline.rules.models import Rule, RuleState, rule_from
 from pipeline.rules.proposals import Proposal, build as build_proposals
@@ -366,15 +366,18 @@ def _advance_claims(
 
 
 def _decide_all(
-    cases: list[ExceptionCase], store: RuleStore, batch: int
+    cases: list[ExceptionCase], store: RuleStore, batch: int, guardrails: GuardrailConfig
 ) -> list[Decision]:
     """Consult the rule store on every case, recording what each rule predicted.
 
     The observation is written here rather than inside ``decide`` because a rule is an
     immutable dataclass and the store is the thing that owns it. A rule that fired also
     has its ``last_fired_batch`` stamped, which is what the rules page shows.
+
+    The guardrail policy is passed in rather than read here, because the ceiling is a
+    number the business sets and a run has to be able to say which one it ran under.
+    A module that reaches for the config mid-loop cannot be asked that question.
     """
-    guardrails = guardrail_config_from(thresholds())
     decisions: list[Decision] = []
     for case in cases:
         decision, observation = decide(case, store.predicting, guardrails)
@@ -424,6 +427,7 @@ def run_learning_batch(
     finding_log: FindingLog,
     register: ClaimRegister,
     narrator: Narrator | None = None,
+    guardrails: GuardrailConfig | None = None,
 ) -> BatchLearning:
     """One batch, all eight steps, in order. See the module docstring for why that order."""
     result = run_batch(tables, book, cfg)
@@ -431,7 +435,9 @@ def run_learning_batch(
     cases = build_cases(result, finding_log)
 
     hypotheses = _hypothesise_all(client, cases)
-    decisions = _decide_all(cases, store, batch)
+    decisions = _decide_all(
+        cases, store, batch, guardrails or guardrail_config_from(thresholds())
+    )
     proposals = build_proposals(batch, decisions, {r.rule_id: r for r in store.rules})
 
     _apply_card_decisions(store, log, batch)
@@ -469,8 +475,13 @@ def run(
     last_batch: int | None = None,
     narrator: Narrator | None = None,
     allow_network: bool = True,
+    guardrails: GuardrailConfig | None = None,
 ) -> LearningRun:
-    """Walk the corpus, learning as it goes."""
+    """Walk the corpus, learning as it goes.
+
+    ``guardrails`` defaults to the policy in ``config/thresholds.yaml``. A caller
+    passes one to ask what a different ceiling would have done -- see the CLI below.
+    """
     pricing = load_yaml(CONFIG_DIR / "pricing.yaml")
     ledger = UsageLedger()
     client = client_from(
@@ -483,6 +494,7 @@ def run(
     log = operator_log if operator_log is not None else resolution_log.load()
 
     cfg = match_config_from(thresholds())
+    policy = guardrails or guardrail_config_from(thresholds())
     book = OpenBook.empty()
     finding_log = FindingLog()
     store = RuleStore()
@@ -494,7 +506,7 @@ def run(
         run_record.batches.append(
             run_learning_batch(
                 load_batch(batch, generated_dir), book, cfg, store, client, log,
-                finding_log, register, narrator,
+                finding_log, register, narrator, policy,
             )
         )
     run_record.tokens_estimated = client.tokens_estimated
@@ -536,14 +548,75 @@ def summarise(batch: BatchLearning) -> str:
     )
 
 
+def rupees(raw: str) -> Decimal:
+    """Parse a ceiling off the command line at the paise grain money uses everywhere."""
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError(f"{raw!r} is not an amount in rupees") from None
+    if value < ZERO:
+        raise argparse.ArgumentTypeError("a variance ceiling cannot be negative")
+    return value.quantize(Decimal("0.01"))
+
+
+def ceiling_argument(parser: argparse.ArgumentParser) -> None:
+    """``--max-variance-inr``, shared by ``make learn`` and ``make score``.
+
+    A what-if, not a setting. The standing policy is ``config/thresholds.yaml``; this
+    flag answers "what would a ₹2,000 default have closed, and at what precision?"
+    without editing the file, and every run that uses it says so in its output.
+    """
+    parser.add_argument(
+        "--max-variance-inr", type=rupees, default=None, metavar="RUPEES",
+        help=(
+            "run with a different default auto-resolution ceiling. Per-cause and "
+            "per-channel overrides in config/thresholds.yaml still apply."
+        ),
+    )
+
+
+def policy_from(args: argparse.Namespace) -> tuple[GuardrailConfig, bool]:
+    """The guardrail policy for this run, and whether the CLI moved it."""
+    configured = guardrail_config_from(thresholds())
+    if args.max_variance_inr is None:
+        return configured, False
+    return configured.with_default_ceiling(args.max_variance_inr), True
+
+
+def describe_policy(policy: GuardrailConfig, overridden: bool) -> list[str]:
+    """The ceilings in force, printed before the numbers they produced.
+
+    Printed on every run, not only an overridden one. A reader who has to go and look
+    up which ceiling a report was produced under is a reader who will assume the
+    default, and the assumption is the thing that goes stale.
+    """
+    source = "--max-variance-inr" if overridden else "config/thresholds.yaml"
+    lines = [
+        f"auto-resolution ceiling: ₹{policy.default_ceiling.max_variance_inr} by default"
+        f"  [{source}]"
+    ]
+    for ceiling in policy.overrides:
+        who = f" — set by {ceiling.set_by}" if ceiling.set_by else ""
+        lines.append(f"    ₹{ceiling.max_variance_inr:>12} for {ceiling.scope}{who}")
+        if ceiling.note:
+            lines.append(f"                 {ceiling.note}")
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the learning loop across the corpus.")
     parser.add_argument(
         "--offline", action="store_true",
         help="never call the API, even with a key set; answer only from data/llm_cache",
     )
+    ceiling_argument(parser)
     args = parser.parse_args()
-    record = run(allow_network=not args.offline)
+    policy, overridden = policy_from(args)
+    for line in describe_policy(policy, overridden):
+        print(line)
+    print()
+
+    record = run(allow_network=not args.offline, guardrails=policy)
     for batch in record.batches:
         print(summarise(batch))
 

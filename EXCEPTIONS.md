@@ -41,20 +41,20 @@ pay for: they are out of the seller's hands and on a clock.
 
 | claim | platform | cause | order | amount | status | deadline | clock |
 |---|---|---|---|---|---|---|---|
-| `CLM-0029` | myntra | `promo_cofunding_deduction` | `ord_000533` | ₹212.56 | filed | 2025-03-25 | 9 days left |
-| `CLM-0030` | myntra | `promo_cofunding_deduction` | `ord_000558` | ₹81.84 | filed | 2025-03-25 | 9 days left |
-| `CLM-0031` | myntra | `promo_cofunding_deduction` | `ord_000563` | ₹249.36 | filed | 2025-03-25 | 9 days left |
-| `CLM-0034` | amazon | `missing_settlement_row` | `ord_000523` | ₹1903.73 | drafted | 2025-04-01 | 16 days left |
-| `CLM-0035` | myntra | `promo_cofunding_deduction` | `ord_000669` | ₹460.56 | filed | 2025-04-01 | 16 days left |
-| `CLM-0036` | myntra | `promo_cofunding_deduction` | `ord_000726` | ₹313.12 | filed | 2025-04-01 | 16 days left |
-| `CLM-0037` | flipkart | `weight_dispute_hold` | `ord_000727` | ₹1593.96 | filed | 2025-04-01 | 16 days left |
-| `CLM-0038` | myntra | `promo_cofunding_deduction` | `ord_000733` | ₹369.32 | filed | 2025-04-01 | 16 days left |
-| `CLM-0039` | flipkart | `weight_dispute_hold` | `ord_000736` | ₹2765.51 | filed | 2025-04-01 | 16 days left |
-| `CLM-0040` | flipkart | `weight_dispute_hold` | `ord_000763` | ₹1394.68 | drafted | 2025-04-01 | 16 days left |
-| `CLM-0049` | amazon | `promo_cofunding_deduction` | `ord_000861` | ₹207.96 | filed | 2025-04-08 | 23 days left |
-| `CLM-0052` | amazon | `promo_cofunding_deduction` | `ord_000925` | ₹48.60 | filed | 2025-04-08 | 23 days left |
-| `CLM-0056` | amazon | `promo_cofunding_deduction` | `ord_001011` | ₹143.42 | filed | 2025-04-15 | 30 days left |
-| `CLM-0057` | amazon | `promo_cofunding_deduction` | `ord_001048` | ₹100.44 | filed | 2025-04-15 | 30 days left |
+| `CLM-0029` | myntra | `promo_cofunding_deduction` | `ord_000533` | ₹212.56 | filed | 2025-08-26 | 9 days left |
+| `CLM-0030` | myntra | `promo_cofunding_deduction` | `ord_000558` | ₹81.84 | filed | 2025-08-26 | 9 days left |
+| `CLM-0031` | myntra | `promo_cofunding_deduction` | `ord_000563` | ₹249.36 | filed | 2025-08-26 | 9 days left |
+| `CLM-0034` | amazon | `missing_settlement_row` | `ord_000523` | ₹1903.73 | drafted | 2025-09-02 | 16 days left |
+| `CLM-0035` | myntra | `promo_cofunding_deduction` | `ord_000669` | ₹460.56 | filed | 2025-09-02 | 16 days left |
+| `CLM-0036` | myntra | `promo_cofunding_deduction` | `ord_000726` | ₹313.12 | filed | 2025-09-02 | 16 days left |
+| `CLM-0037` | flipkart | `weight_dispute_hold` | `ord_000727` | ₹1593.96 | filed | 2025-09-02 | 16 days left |
+| `CLM-0038` | myntra | `promo_cofunding_deduction` | `ord_000733` | ₹369.32 | filed | 2025-09-02 | 16 days left |
+| `CLM-0039` | flipkart | `weight_dispute_hold` | `ord_000736` | ₹2765.51 | filed | 2025-09-02 | 16 days left |
+| `CLM-0040` | flipkart | `weight_dispute_hold` | `ord_000763` | ₹1394.68 | drafted | 2025-09-02 | 16 days left |
+| `CLM-0049` | amazon | `promo_cofunding_deduction` | `ord_000861` | ₹207.96 | filed | 2025-09-09 | 23 days left |
+| `CLM-0052` | amazon | `promo_cofunding_deduction` | `ord_000925` | ₹48.60 | filed | 2025-09-09 | 23 days left |
+| `CLM-0056` | amazon | `promo_cofunding_deduction` | `ord_001011` | ₹143.42 | filed | 2025-09-16 | 30 days left |
+| `CLM-0057` | amazon | `promo_cofunding_deduction` | `ord_001048` | ₹100.44 | filed | 2025-09-16 | 30 days left |
 | `CLM-0048` | website | `chargeback_deduction` | `ord_000824` | ₹3435.95 | filed | — | no configured window |
 | `CLM-0050` | website | `chargeback_deduction` | `ord_000911` | ₹1064.28 | filed | — | no configured window |
 | `CLM-0051` | website | `chargeback_deduction` | `ord_000923` | ₹6203.07 | drafted | — | no configured window |
@@ -76,17 +76,17 @@ the system identified, chased, and then lost to a clock.
 
 | claim | platform | cause | order | amount | opened | expired on |
 |---|---|---|---|---|---|---|
-| `CLM-0005` | myntra | `tcs_timing_mismatch` | `ord_000116` | ₹19.51 | batch 3 | 2025-02-10 |
-| `CLM-0001` | flipkart | `weight_dispute_hold` | `ord_000006` | ₹3192.23 | batch 1 | 2025-02-11 |
-| `CLM-0002` | flipkart | `weight_dispute_hold` | `ord_000015` | ₹2673.98 | batch 1 | 2025-02-11 |
-| `CLM-0004` | flipkart | `short_payment_unexplained` | `ord_000114` | ₹429.51 | batch 2 | 2025-02-18 |
-| `CLM-0006` | flipkart | `weight_dispute_hold` | `ord_000251` | ₹2263.81 | batch 4 | 2025-03-04 |
-| `CLM-0007` | flipkart | `weight_dispute_hold` | `ord_000297` | ₹1810.95 | batch 4 | 2025-03-04 |
-| `CLM-0008` | flipkart | `weight_dispute_hold` | `ord_000303` | ₹2666.68 | batch 4 | 2025-03-04 |
-| `CLM-0028` | flipkart | `tcs_timing_mismatch` | `ord_000464` | ₹26.48 | batch 7 | 2025-03-10 |
-| `CLM-0009` | amazon | `missing_settlement_row` | `ord_000040` | ₹2162.67 | batch 5 | 2025-03-11 |
-| `CLM-0015` | myntra | `missing_settlement_row` | `ord_000203` | ₹2152.07 | batch 5 | 2025-03-11 |
-| `CLM-0017` | myntra | `short_payment_unexplained` | `ord_000396` | ₹118.88 | batch 5 | 2025-03-11 |
+| `CLM-0005` | myntra | `tcs_timing_mismatch` | `ord_000116` | ₹19.51 | batch 3 | 2025-07-10 |
+| `CLM-0001` | flipkart | `weight_dispute_hold` | `ord_000006` | ₹3192.23 | batch 1 | 2025-07-15 |
+| `CLM-0002` | flipkart | `weight_dispute_hold` | `ord_000015` | ₹2673.98 | batch 1 | 2025-07-15 |
+| `CLM-0004` | flipkart | `short_payment_unexplained` | `ord_000114` | ₹429.51 | batch 2 | 2025-07-22 |
+| `CLM-0006` | flipkart | `weight_dispute_hold` | `ord_000251` | ₹2263.81 | batch 4 | 2025-08-05 |
+| `CLM-0007` | flipkart | `weight_dispute_hold` | `ord_000297` | ₹1810.95 | batch 4 | 2025-08-05 |
+| `CLM-0008` | flipkart | `weight_dispute_hold` | `ord_000303` | ₹2666.68 | batch 4 | 2025-08-05 |
+| `CLM-0028` | flipkart | `tcs_timing_mismatch` | `ord_000464` | ₹26.48 | batch 7 | 2025-08-10 |
+| `CLM-0009` | amazon | `missing_settlement_row` | `ord_000040` | ₹2162.67 | batch 5 | 2025-08-12 |
+| `CLM-0015` | myntra | `missing_settlement_row` | `ord_000203` | ₹2152.07 | batch 5 | 2025-08-12 |
+| `CLM-0017` | myntra | `short_payment_unexplained` | `ord_000396` | ₹118.88 | batch 5 | 2025-08-12 |
 
 ---
 
@@ -139,7 +139,7 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `HDFCN25010900011` | bank | — | — | ₹1698.04 | settlement_sum=38617.00; bank_amount=36918.96; shortfall=1698.04; residual_rows=st_001110; rows_in_group=26 |
+| `HDFCN25061200011` | bank | — | — | ₹1698.04 | settlement_sum=38617.00; bank_amount=36918.96; shortfall=1698.04; residual_rows=st_001110; rows_in_group=26 |
 
 ### `not_funded_by_bank_credit` — 1 row(s), ₹1698.04 in question
 
@@ -362,7 +362,7 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ICICN25012700024` | bank | — | — | ₹4272.09 | settlement_sum=52026.67; bank_amount=47754.58; shortfall=4272.09; residual_rows=st_001141; rows_in_group=20 |
+| `ICICN25063000024` | bank | — | — | ₹4272.09 | settlement_sum=52026.67; bank_amount=47754.58; shortfall=4272.09; residual_rows=st_001141; rows_in_group=20 |
 
 ### `malformed_unparseable_date` — 1 row(s), ₹0.00 in question
 
@@ -460,13 +460,13 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ord_000040` | ledger | — | amazon | ₹2162.67 | expected_net=2162.67; due_by=2025-02-02 |
-| `ord_000142` | ledger | — | amazon | ₹2858.67 | expected_net=2858.67; due_by=2025-02-02 |
-| `ord_000148` | ledger | — | amazon | ₹3239.62 | expected_net=3239.62; due_by=2025-02-02 |
-| `ord_000156` | ledger | — | amazon | ₹3049.06 | expected_net=3049.06; due_by=2025-02-02 |
-| `ord_000193` | ledger | — | myntra | ₹1200.29 | expected_net=1200.29; due_by=2025-02-02 |
-| `ord_000202` | ledger | — | amazon | ₹1421.49 | expected_net=1421.49; due_by=2025-02-02 |
-| `ord_000203` | ledger | — | myntra | ₹2152.07 | expected_net=2152.07; due_by=2025-02-02 |
+| `ord_000040` | ledger | — | amazon | ₹2162.67 | expected_net=2162.67; due_by=2025-07-06 |
+| `ord_000142` | ledger | — | amazon | ₹2858.67 | expected_net=2858.67; due_by=2025-07-06 |
+| `ord_000148` | ledger | — | amazon | ₹3239.62 | expected_net=3239.62; due_by=2025-07-06 |
+| `ord_000156` | ledger | — | amazon | ₹3049.06 | expected_net=3049.06; due_by=2025-07-06 |
+| `ord_000193` | ledger | — | myntra | ₹1200.29 | expected_net=1200.29; due_by=2025-07-06 |
+| `ord_000202` | ledger | — | amazon | ₹1421.49 | expected_net=1421.49; due_by=2025-07-06 |
+| `ord_000203` | ledger | — | myntra | ₹2152.07 | expected_net=2152.07; due_by=2025-07-06 |
 
 ### `net_variance_outside_tolerance` — 4 row(s), ₹478.93 in question
 
@@ -564,12 +564,12 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ord_000227` | ledger | — | amazon | ₹575.93 | expected_net=575.93; due_by=2025-02-09 |
-| `ord_000244` | ledger | — | amazon | ₹1595.81 | expected_net=1595.81; due_by=2025-02-09 |
-| `ord_000250` | ledger | — | amazon | ₹3685.93 | expected_net=3685.93; due_by=2025-02-09 |
-| `ord_000278` | ledger | — | amazon | ₹1323.86 | expected_net=1323.86; due_by=2025-02-09 |
-| `ord_000293` | ledger | — | amazon | ₹2906.48 | expected_net=2906.48; due_by=2025-02-09 |
-| `ord_000300` | ledger | — | amazon | ₹2940.36 | expected_net=2940.36; due_by=2025-02-09 |
+| `ord_000227` | ledger | — | amazon | ₹575.93 | expected_net=575.93; due_by=2025-07-13 |
+| `ord_000244` | ledger | — | amazon | ₹1595.81 | expected_net=1595.81; due_by=2025-07-13 |
+| `ord_000250` | ledger | — | amazon | ₹3685.93 | expected_net=3685.93; due_by=2025-07-13 |
+| `ord_000278` | ledger | — | amazon | ₹1323.86 | expected_net=1323.86; due_by=2025-07-13 |
+| `ord_000293` | ledger | — | amazon | ₹2906.48 | expected_net=2906.48; due_by=2025-07-13 |
+| `ord_000300` | ledger | — | amazon | ₹2940.36 | expected_net=2940.36; due_by=2025-07-13 |
 
 ### `net_variance_outside_tolerance` — 2 row(s), ₹26.48 in question
 
@@ -686,10 +686,10 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ord_000357` | ledger | — | amazon | ₹3582.77 | expected_net=3582.77; due_by=2025-02-16 |
-| `ord_000366` | ledger | — | amazon | ₹545.95 | expected_net=545.95; due_by=2025-02-16 |
-| `ord_000372` | ledger | — | amazon | ₹2130.10 | expected_net=2130.10; due_by=2025-02-16 |
-| `ord_000381` | ledger | — | amazon | ₹2104.31 | expected_net=2104.31; due_by=2025-02-16 |
+| `ord_000357` | ledger | — | amazon | ₹3582.77 | expected_net=3582.77; due_by=2025-07-20 |
+| `ord_000366` | ledger | — | amazon | ₹545.95 | expected_net=545.95; due_by=2025-07-20 |
+| `ord_000372` | ledger | — | amazon | ₹2130.10 | expected_net=2130.10; due_by=2025-07-20 |
+| `ord_000381` | ledger | — | amazon | ₹2104.31 | expected_net=2104.31; due_by=2025-07-20 |
 
 ## Batch 08 — 88 new
 
@@ -809,9 +809,9 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ord_000511` | ledger | — | amazon | ₹1782.35 | expected_net=1782.35; due_by=2025-02-23 |
-| `ord_000518` | ledger | — | amazon | ₹1981.23 | expected_net=1981.23; due_by=2025-02-23 |
-| `ord_000523` | ledger | — | amazon | ₹1903.73 | expected_net=1903.73; due_by=2025-02-23 |
+| `ord_000511` | ledger | — | amazon | ₹1782.35 | expected_net=1782.35; due_by=2025-07-27 |
+| `ord_000518` | ledger | — | amazon | ₹1981.23 | expected_net=1981.23; due_by=2025-07-27 |
+| `ord_000523` | ledger | — | amazon | ₹1903.73 | expected_net=1903.73; due_by=2025-07-27 |
 
 ### `malformed_missing_order_id` — 1 row(s), ₹0.00 in question
 
@@ -943,19 +943,19 @@ the system identified, chased, and then lost to a clock.
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `ord_000537` | ledger | — | amazon | ₹2310.96 | expected_net=2310.96; due_by=2025-03-02 |
-| `ord_000590` | ledger | — | amazon | ₹1818.80 | expected_net=1818.80; due_by=2025-03-02 |
-| `ord_000600` | ledger | — | amazon | ₹1965.58 | expected_net=1965.58; due_by=2025-03-02 |
-| `ord_000610` | ledger | — | amazon | ₹719.21 | expected_net=719.21; due_by=2025-03-02 |
-| `ord_000612` | ledger | — | amazon | ₹1414.31 | expected_net=1414.31; due_by=2025-03-02 |
-| `ord_000630` | ledger | — | amazon | ₹2068.09 | expected_net=2068.09; due_by=2025-03-02 |
-| `ord_000641` | ledger | — | amazon | ₹572.40 | expected_net=572.40; due_by=2025-03-02 |
+| `ord_000537` | ledger | — | amazon | ₹2310.96 | expected_net=2310.96; due_by=2025-08-03 |
+| `ord_000590` | ledger | — | amazon | ₹1818.80 | expected_net=1818.80; due_by=2025-08-03 |
+| `ord_000600` | ledger | — | amazon | ₹1965.58 | expected_net=1965.58; due_by=2025-08-03 |
+| `ord_000610` | ledger | — | amazon | ₹719.21 | expected_net=719.21; due_by=2025-08-03 |
+| `ord_000612` | ledger | — | amazon | ₹1414.31 | expected_net=1414.31; due_by=2025-08-03 |
+| `ord_000630` | ledger | — | amazon | ₹2068.09 | expected_net=2068.09; due_by=2025-08-03 |
+| `ord_000641` | ledger | — | amazon | ₹572.40 | expected_net=572.40; due_by=2025-08-03 |
 
 ### `bank_group_sum_mismatch` — 1 row(s), ₹3288.13 in question
 
 | row | table | order | channel | impact | what the matcher measured |
 |---|---|---|---|---|---|
-| `AXISN25030400009` | bank | — | — | ₹3288.13 | settlement_sum=71026.95; bank_amount=67738.82; shortfall=3288.13; residual_rows=st_001208; rows_in_group=50 |
+| `AXISN25080500009` | bank | — | — | ₹3288.13 | settlement_sum=71026.95; bank_amount=67738.82; shortfall=3288.13; residual_rows=st_001208; rows_in_group=50 |
 
 ### `malformed_unparseable_date` — 1 row(s), ₹0.00 in question
 

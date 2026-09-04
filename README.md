@@ -71,6 +71,8 @@ make learn          # the learning loop and the claims register
 make resolutions    # rebuild the operator's work log
 make reporting      # rebuild the question log and the pinned metrics
 make score          # score against the answer key; writes EXCEPTIONS.md + RESULTS.md
+make whatif ceiling=3000   # rescore under a different auto-resolution ceiling, writing nothing
+make ceilings       # score every candidate ceiling; writes the curve the threshold control reads
 make ui-data        # build the JSON the React UI reads
 make llm-fixtures   # repopulate data/llm_cache (calls the API if a key is set)
 ```
@@ -164,11 +166,15 @@ closed by a rule induced from a human's sentence. Quoting 69.17% against 43–85
 the flattering comparison and would compare two different things.
 
 The third row is also the one a build could game, and the reason it sits where it does is
-the guardrails. Anything above the ₹500 variance ceiling is refused automation however
-confident the rule is, so the system automates volume and escalates value:
-**₹8,203.42 auto-resolved against ₹490,401.48 escalated.** Raising that ceiling would move
-12.07% toward 43% overnight and would be the wrong trade, because the rows above it are
-where the money is.
+the guardrails. Anything above the ₹500 default variance ceiling is refused automation
+however confident the rule is, so the system automates volume and escalates value:
+**₹8,203.42 auto-resolved against ₹490,401.48 escalated.** Raising that ceiling moves
+12.07% toward 43% overnight, and `make whatif ceiling=3000` will show you exactly how far.
+That is a decision about risk appetite and it belongs to the business, not to this
+README — so the ceiling is a number they set, per cause and per channel, and every run
+prints the policy it ran under. What the shipped default asserts is only that ₹500 is
+where *this* seller drew the line. See
+[Ceilings are set by the business](#ceilings-are-set-by-the-business-not-by-the-rule).
 
 ---
 
@@ -447,8 +453,8 @@ batch  opened  draft  filed  recov  exp      ₹ opened    ₹ recovered    ₹ 
     2       2      2      2      0    0       ₹717.48          ₹0.00        ₹0.00     4     ₹6583.69
     3       1      0      1      0    0        ₹19.51          ₹0.00        ₹0.00     5     ₹6603.20
     4       3      3      2      1    0      ₹6741.44        ₹287.97        ₹0.00     7    ₹13056.67
-    5       9      9      6      0    0     ₹16562.80          ₹0.00        ₹0.00    16    ₹29619.47
-    6       6      6      2      5    3     ₹13028.37      ₹11769.13     ₹5885.72    14    ₹24992.99
+    5       9      9      6      0    1     ₹16562.80          ₹0.00       ₹19.51    15    ₹29599.96
+    6       6      6      2      5    2     ₹13028.37      ₹11769.13     ₹5866.21    14    ₹24992.99
     7       8      7      6      6    1      ₹8933.37      ₹13028.37      ₹429.51    15    ₹20468.48
     8       9      9      7      4    0     ₹12564.46       ₹8363.13        ₹0.00    20    ₹24669.81
     9      12     12      6      3    3     ₹21829.21       ₹4123.63     ₹6741.44    26    ₹35633.95
@@ -502,7 +508,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      361 test functions, 388 cases
+tests/      378 test functions, 410 cases
 ```
 
 Four artifacts leave a run and all four are committed: `EXCEPTIONS.md` (what it could not
@@ -745,9 +751,10 @@ evidence, and a shadow prediction nobody has ruled on is not a confirmation.
 Retirement is automatic and it is shown, not hidden. **R-07** was induced in batch 2
 from a note that generalised across every marketplace, predicted on six late deductions
 in batch 3, was contradicted by the operator's own Amazon resolutions, and retired
-itself at 40.00% precision over five judged observations. The rules page shows it in red
-with the reason. `FAILURES.md` #24 has the full story, including why the note that
-caused it was not quietly rewritten.
+itself at 40.00% precision over five judged observations. The rules page carries it with
+its reason, in a red-railed row under a footnote naming it — a working mechanism rather
+than an incident, which is why it is not a banner. `FAILURES.md` #24 has the full story,
+including why the note that caused it was not quietly rewritten.
 
 ### Guardrails run after the rule matches, and they override it
 
@@ -758,7 +765,7 @@ did you check?" is a question asked about the resolutions that went *through*.
 
 | guardrail | source | effect |
 |---|---|---|
-| `max_variance_inr` | `config/thresholds.yaml` | above ₹500, never auto-resolve |
+| `max_variance_inr` | `config/thresholds.yaml` | above ₹500 by default, never auto-resolve — set per cause and per channel |
 | `never_auto_resolve_causes` | same | TCS, TDS and chargebacks, whatever a rule believes |
 | resolution class | `config/causes.yaml` | `tax_review`, `investigate` and `counterparty_claim` are always human |
 
@@ -769,6 +776,89 @@ The visible consequence is that the system **automates volume and escalates valu
 ₹8,203 auto-resolved against ₹490,401 escalated across the corpus. That is the
 guardrails working, not a limitation, and the report prints both figures beside each
 other so the ratio cannot be quietly inverted.
+
+### Ceilings are set by the business, not by the rule
+
+One ceiling for every case is a policy about the average case, and there is no average
+case. A stale commission rate is arithmetic somebody can check against a rate card; a
+four-figure clawback on a marketplace return is money at risk until someone confirms the
+return happened. Holding both to ₹500 is a coincidence, not a judgement.
+
+So `max_variance_inr` is a default, and finance sets ceilings under it:
+
+```yaml
+# config/thresholds.yaml
+auto_resolution:
+  max_variance_inr: 500.00            # the default: governs anything below
+  max_variance_overrides:
+    - cause: commission_rate_stale
+      max_variance_inr: 1500.00
+      set_by: finance.head@demostore.in
+      note: A rate that moved is arithmetic we can check, not a dispute.
+    - channel: offline
+      max_variance_inr: 0.00          # nothing at the counter closes itself
+      set_by: finance.head@demostore.in
+```
+
+Four properties, and each one exists because the alternative fails in a specific way:
+
+- **Most specific wins, and a tie goes to the stricter.** `cause` + `channel` beats
+  either alone, which beats the default. A cause-scoped and a channel-scoped ceiling are
+  equally specific and can meet on one case — `commission_rate_stale` at ₹1,500 and
+  `offline` at ₹0 meet on an offline commission variance — and there the lower one
+  governs. Both are your policy and neither is aimed more precisely, so the tie resolves
+  toward the person, which is the same direction `predicates.select` resolves a tie
+  between two equally specific *rules* (there it escalates, because a rule tie has no
+  safe merge; here it takes the safe one). Specificity then amount is a total order, so
+  file order never decides. The same scope set twice is a load error.
+- **A scope that could never fire is a load error.** A cause or channel outside the
+  frozen enums is rejected rather than accepted-and-ignored. A typo that presents as a
+  ceiling silently never applying is the worst way for this number to be wrong.
+- **A ceiling is not a master switch.** It is one of three guardrails. Setting ₹99,999
+  for `chargeback_deduction` does not make chargebacks automatable — the cause list and
+  the resolution class still hold, and `test_a_scoped_ceiling_cannot_lift_a_blocked_cause_or_class`
+  is what says so.
+- **It cannot be invisible.** The governing ceiling and who set it are written into the
+  guardrail detail of every decision it touched, so the decision path in the UI reads
+  `₹612.00 is above the ₹500.00 ceiling for cause=rto_reversal_later_cycle, set by
+  finance.head@demostore.in`. The score report opens with the policy in force, and the
+  dashboard reads the number off the run rather than hardcoding it.
+
+`0.00` disables auto-resolution for a scope entirely — a legitimate setting, and the one
+to reach for when the objection is "not this cause, not ever" rather than "not this much".
+
+**Trying it is not the same as deciding it.** `make whatif ceiling=3000` scores the whole
+corpus at a different default and prints the report; it writes nothing, because
+`RESULTS.md`, `EXCEPTIONS.md` and `data/score.json` are the committed record of the
+shipped policy and the figures on this page are quoted out of them. Changing
+`config/thresholds.yaml` *is* the decision, and that regenerates them normally.
+
+**And the trap in doing it on one number.** `make ceilings` scores the whole corpus at
+every candidate ceiling and prints two precision series, because they are not the same
+number and they do not move the same way:
+
+| ceiling | closed | wrong | true % | live % | gap |
+|---|---|---|---|---|---|
+| ₹500 (shipped) | 146 | 2 | **98.63** | 98.63 | 0.00 |
+| ₹600 | 149 | 2 | **98.66** | 98.66 | 0.00 |
+| ₹700 | 155 | 4 | 97.42 | 98.71 | 1.29 |
+| ₹1,000 | 162 | 7 | 95.68 | 98.77 | 3.09 |
+| ₹2,000 | 202 | 21 | 89.60 | 99.01 | 9.41 |
+| ₹3,000 | 233 | 30 | 87.12 | **99.14** | 12.02 |
+
+`live` is what the product can see — a rule judged against the cause the operator's own
+words imply. `true` is the harness's, judged against the answer key the pipeline never
+reads. **Live precision rises with the ceiling and true precision falls.** The marginal
+rows are ones a rule and an operator get wrong in the same direction ([FAILURES.md](FAILURES.md)
+#22), and the bigger the row the more often they agree wrongly — so a ceiling chosen on
+live precision alone rises forever while the system reports it is getting better at it.
+That is [FAILURES.md](FAILURES.md) #40, and it was one commit from shipping.
+
+₹600 is the frontier: three more rows closed, the same two errors, the two measures still
+in agreement. Past it the gap opens. The build ships at ₹500 because that is where the
+seller drew the line, not because ₹600 is wrong — and the threshold control on **Report &
+Settings** shows every row of that table so the next person can move it on evidence rather
+than on the flattering half of it.
 
 ### Two review series, because one would flatter
 
@@ -829,7 +919,7 @@ clock:
   calendar date, not a duration: a claim opened on the 2nd has 39 days and one opened on
   the 28th has 13. Forcing it into a days-remaining model would put a wrong number on
   screen for eleven months of the year. In this corpus `CLM-0005` is that case — ₹19.51,
-  expired 2025-02-10, the earliest expiry in the whole register.
+  expired 2025-07-10, the earliest expiry in the whole register.
 
 A platform with no configured window gets **no clock at all**, sorted last, labelled "no
 configured filing window". A default would be a countdown no agreement backs, in a queue
@@ -897,12 +987,12 @@ Evidence from our reconciliation:
   Commission expected               ₹723.80
   Commission charged                ₹723.80
   Amount claimed                    ₹287.97
-  Discrepancy raised on             2025-01-19
-  Filing deadline                   2025-02-18
+  Discrepancy raised on             2025-06-22
+  Filing deadline                   2025-07-22
 
 Please itemise the deduction that produced this shortfall or remit the balance.
 
-Filing basis: 30-day flipkart filing window from 2025-01-19.
+Filing basis: 30-day flipkart filing window from 2025-06-22.
 
 — TallyTrace reconciliation, Demo Store
 ```
@@ -1203,8 +1293,9 @@ printed in the terminal.
   pairs one row each, and the claim attribution table, which is the least flattering
   thing in the UI and is not hidden behind anything.
 - **Rules** — every rule with its state, conditions, support, live *and* true precision,
-  full lifecycle history with reasons, and the resolution it descends from. The retired
-  rule is at the top in red.
+  full lifecycle history with reasons, and the resolution it descends from. Sorted by
+  state and then by how often each fired; the retired rule is named in a footnote under
+  the list that filters to it, rather than put on top in alarm colours.
 - **Ask** — two panes, and the split is the product. On the left you talk to the books:
   describe the metric you want, the model maps it onto one registered id and states in a
   sentence what it is about to compute, and **nothing runs until you accept that
@@ -1221,6 +1312,13 @@ Screens are addressable: `#claims` opens the claims queue, and `#ask?q=<question
 the ask surface and asks it — `&yes=1` accepts the restatement the way `--yes` does on
 `make ask`. Useful for linking someone straight at the refusal, which is the part of that
 surface worth showing first.
+
+A batch is addressable the same way. `#review?week=6` opens the review queue on batch 6,
+because every claim this repo makes is a claim about a particular batch and "the queue in
+batch six" should be a URL rather than a click someone has to be told to make. Out of
+range clamps to the last batch, and a hash naming no week leaves the current one alone.
+**The app opens on the last batch**, which is the week whose books are being closed;
+batch 1 is the state before anything has been learned.
 
 Money crosses one boundary to get here: `tools/build_ui_data.py::money` is the only
 function in the repo that turns a `Decimal` into a float, because JavaScript has no

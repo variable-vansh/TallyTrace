@@ -125,7 +125,8 @@ matching:
   fee_variance_tolerance_pct: 0.5
 
 auto_resolution:
-  max_variance_inr: 500.00          # above this, never auto-resolve
+  max_variance_inr: 500.00          # the default: above this, never auto-resolve
+  max_variance_overrides: []        # per-cause / per-channel ceilings the business sets
   never_auto_resolve_causes:        # regardless of rule confidence
     - tcs_timing_mismatch
     - tds_timing_mismatch
@@ -207,6 +208,18 @@ quietly does the wrong thing, so these are enforcement rules, not style preferen
   bug. Add a test that asserts types on the matcher's inputs.
 - **Config, not constants.** Any number that could be argued about lives in
   `config/`. If an agent inlines `0.22` or `500`, reject it.
+
+  `max_variance_inr` is the **default** ceiling, not the only one: one number for every
+  case is a policy about the average case and there is no average case. The business
+  scopes ceilings under it by cause and by channel through `max_variance_overrides`
+  (most specific wins, an equally specific tie goes to the lower ceiling, the same
+  scope twice is a load error, and `0.00` disables auto-resolution for a scope). This does not relax checkpoint 3's "do not
+  tune the guardrails to raise the auto-resolution rate" — that instruction is about
+  who the number belongs to. Moving it is a business decision that has to be visible,
+  so the governing ceiling and who set it travel in every decision's guardrail detail,
+  the score report opens with the policy in force, and `--max-variance-inr` is a
+  what-if that writes no artifact. Tuning the shipped default to flatter a metric is
+  still the thing not to do.
 - **Pure functions in the matcher.** Matching functions take data and config, return
   results. No I/O, no global state, no side effects. This is what makes them testable
   and what makes the "deterministic by choice" claim verifiable.

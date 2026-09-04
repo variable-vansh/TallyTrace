@@ -1,8 +1,8 @@
 import {
-  Area, AreaChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer,
-  Tooltip, XAxis, YAxis,
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { TrendingDown, TrendingUp, Minus, ShieldCheck, Brain, IndianRupee, Layers, Gavel } from 'lucide-react'
+import AutomationSplit from '../components/AutomationSplit'
 import StatCard from '../components/StatCard'
 import StatusBadge from '../components/StatusBadge'
 import { inr, pct } from '../lib/format'
@@ -23,9 +23,13 @@ function Figure({ label, value, sub, tone = 'text-gray-900' }) {
   )
 }
 
-export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
+export default function Dashboard({ weekData, allWeeks, selectedWeek, onSelectWeek, data }) {
   const prevWeek = allWeeks[selectedWeek - 1]
   const stats = weekData.stats
+  // The ceiling is a number finance sets, so it is read from the run rather than
+  // typed here. A hardcoded ₹500 would be a component quietly disagreeing with config.
+  const policy = data.autoResolutionPolicy
+  const overrides = policy?.overrides ?? []
 
   const delta = (key) => (prevWeek ? stats[key] - prevWeek.stats[key] : undefined)
 
@@ -38,82 +42,62 @@ export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
 
   const trend = allWeeks.map((w, i) => ({
     name: `W${w.week}`,
-    matcher: data.matcherReviewRateTrend[i],
-    net: data.reviewRateTrend[i],
-    touch: data.touchpointRateTrend[i],
     precision: data.precisionTrend[i],
   }))
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Hero + trend */}
+      {/* Hero + the three-way split */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* The merchant's question, not the tool's. A dashboard that leads with its own
+            review rate is a dashboard about itself; the seller opened it to find out
+            what is wrong with the books. The tool's own numbers still appear — under
+            the money, and in full on Report & Settings. */}
         <div className="bg-white rounded-2xl border border-divider p-6 flex flex-col justify-center">
           <h2 className="text-sm font-medium text-muted uppercase tracking-wide mb-2">
-            Manual review rate
+            Unexplained this week
           </h2>
-          <div className="text-5xl font-bold text-gray-900 mb-1">{pct(stats.manualReviewRate)}</div>
+          <div className="text-4xl font-bold text-gray-900 mb-1">
+            {inr(stats.rupeesEscalated, { whole: true })}
+          </div>
           <p className="text-xs text-muted mb-3">
-            of {stats.totalTransactions} settlement rows, after learned rules
+            across {stats.flaggedForReview - stats.autoResolved} rows nobody has accounted for
+            yet · {inr(stats.rupeesAutoResolved, { whole: true })} closed automatically
           </p>
-          {prevWeek && (
-            <div className={`flex items-center gap-1 font-medium ${deltaColor}`}>
-              <DeltaIcon size={18} />
-              <span>{Math.abs(reviewDelta)} pts vs previous week</span>
+          <div className="pt-3 border-t border-divider">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs text-muted">Being chased from platforms</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {inr(Number(data.totals?.rupees_open ?? 0), { whole: true })}
+              </span>
             </div>
-          )}
-          <div className="mt-4 pt-4 border-t border-divider flex items-center gap-2 flex-wrap">
-            <StatusBadge variant="blue">{pct(stats.touchpointRate)} touchpoints</StatusBadge>
-            {stats.autoResolutionPrecision !== null && (
-              <StatusBadge variant="success">
-                {pct(stats.autoResolutionPrecision, 2)} precision
-              </StatusBadge>
+            <div className="flex items-baseline justify-between gap-2 mt-1">
+              <span className="text-xs text-muted">Recovered so far</span>
+              <span className="text-sm font-semibold text-success">
+                {inr(Number(data.totals?.rupees_recovered ?? 0), { whole: true })}
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-divider flex items-center gap-2 flex-wrap">
+            <StatusBadge variant="muted">{pct(stats.manualReviewRate)} of rows with a human</StatusBadge>
+            {prevWeek && (
+              <span className={`flex items-center gap-1 text-xs font-medium ${deltaColor}`}>
+                <DeltaIcon size={13} />
+                {Math.abs(reviewDelta)} pts
+              </span>
             )}
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-divider p-6 lg:col-span-2 h-72 flex flex-col">
-          <div className="flex items-start justify-between mb-1">
-            <h2 className="text-sm font-medium text-muted uppercase tracking-wide">
-              Review rate — three series, because one would flatter
-            </h2>
-          </div>
-          <p className="text-xs text-muted mb-3">
-            What the matcher leaves · what a human still owns after rules fire · how many
-            separate decisions that actually is
-          </p>
-          <div className="flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trend} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="fillNet" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3D4FE0" stopOpacity={0.18} />
-                    <stop offset="95%" stopColor="#3D4FE0" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E7E7EA" vertical={false} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={AXIS} />
-                <YAxis axisLine={false} tickLine={false} tick={AXIS} unit="%" />
-                <Tooltip {...TOOLTIP} formatter={(v, n) => [`${v}%`, n]} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Area
-                  type="monotone" dataKey="matcher" name="Matcher alone" stroke="#9CA3AF"
-                  strokeWidth={2} strokeDasharray="4 3" fill="none" dot={false}
-                  isAnimationActive={false}
-                />
-                <Area
-                  type="monotone" dataKey="net" name="After learned rules" stroke="#3D4FE0"
-                  strokeWidth={3} fill="url(#fillNet)" isAnimationActive={false}
-                  activeDot={{ r: 5, fill: '#3D4FE0', stroke: 'white', strokeWidth: 2 }}
-                />
-                <Area
-                  type="monotone" dataKey="touch" name="Human decisions" stroke="#1FAA59"
-                  strokeWidth={2.5} fill="none" isAnimationActive={false}
-                  activeDot={{ r: 5, fill: '#1FAA59', stroke: 'white', strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+        {/* What replaced the review-rate trend: the split a person actually asks
+            about — matcher, model, or me — with the AI's own contribution named
+            in issues closed rather than in a rate that only falls. */}
+        <div className="lg:col-span-2">
+          <AutomationSplit
+            allWeeks={allWeeks}
+            selectedWeek={selectedWeek}
+            onSelectWeek={onSelectWeek}
+          />
         </div>
       </div>
 
@@ -200,11 +184,31 @@ export default function Dashboard({ weekData, allWeeks, selectedWeek, data }) {
             </div>
             <div className="text-2xl font-bold text-gray-900">{inr(stats.rupeesEscalated)}</div>
           </div>
-          <p className="text-xs text-muted leading-relaxed border-t border-divider pt-3">
-            The gap is the guardrails working. Anything above the ₹500 ceiling is refused
-            automation however confident the rule is — so the system automates volume and
-            escalates value.
-          </p>
+          <div className="text-xs text-muted leading-relaxed border-t border-divider pt-3">
+            <p>
+              The gap is the guardrails working. Anything above the{' '}
+              <span className="font-medium text-gray-900">
+                {inr(policy?.defaultCeilingInr, { whole: true })}
+              </span>{' '}
+              default ceiling is refused automation however confident the rule is — so the
+              system automates volume and escalates value.
+            </p>
+            {overrides.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {overrides.map((o) => (
+                  <li key={o.scope} className="flex justify-between gap-3">
+                    <span className="truncate" title={o.note || undefined}>
+                      {o.scope.replace(/(cause|channel)=/g, '')}
+                      {o.set_by && <span className="text-gray-400"> · {o.set_by}</span>}
+                    </span>
+                    <span className="font-medium text-gray-900 whitespace-nowrap">
+                      {inr(Number(o.max_variance_inr), { whole: true })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="text-xs text-muted border-t border-divider pt-3">
             <div className="flex justify-between"><span>Rules learned</span><span className="font-medium text-gray-900">{stats.rulesLearned}</span></div>
             <div className="flex justify-between"><span>Promoted to active</span><span className="font-medium text-gray-900">{stats.rulesPromoted}</span></div>

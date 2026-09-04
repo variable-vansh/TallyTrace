@@ -125,7 +125,7 @@ def test_resolved_and_held_rows_get_separate_cards_from_the_same_rule() -> None:
     two different things. One card claiming eleven would overstate the first and hide
     the second."""
     small = [case(i, features("30.00")) for i in range(9)]
-    large = [case(20 + i, features(str(CFG.max_variance_inr + D("1")))) for i in range(2)]
+    large = [case(20 + i, features(str(CFG.default_ceiling.max_variance_inr + D("1")))) for i in range(2)]
     proposals, _ = cards(small + large, [rule()])
 
     by_outcome = {p.outcome: p for p in proposals}

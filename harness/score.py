@@ -47,13 +47,20 @@ from harness.truth import AnswerKey, load_answer_key
 from pipeline.cases import FindingLog
 from pipeline.claims.queue import QueueView, build as build_queue
 from pipeline.config import CONFIG_DIR, REPO_ROOT, batch_window, generation, load_yaml, thresholds
-from pipeline.learn import LearningRun, run_learning_batch
+from pipeline.learn import (
+    LearningRun,
+    ceiling_argument,
+    describe_policy,
+    policy_from,
+    run_learning_batch,
+)
 from pipeline.llm.client import client_from
 from pipeline.loader import load_batch
 from pipeline.matcher import BatchResult, match_config_from
 from pipeline.metrics.registry import REGISTRY
 from pipeline.rules import resolutions as operator_log
 from pipeline.rules import store as rule_store
+from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
 from pipeline.rules.models import RuleState
 from pipeline.run import OpenBook, run_batch
 
@@ -80,6 +87,10 @@ class Score:
     queue: QueueView
     reporting: ReportingScore
     run: LearningRun
+    #: The auto-resolution policy this run was scored under. Carried, not re-read:
+    #: a report that quoted a ceiling from config while the run used another would be
+    #: exactly the quiet inversion the rest of this harness exists to prevent.
+    guardrails: GuardrailConfig
 
     def new_findings(self, result: BatchResult) -> list[Any]:
         """Exceptions raised for the first time in this batch. See harness/aging.py."""
@@ -108,7 +119,10 @@ def _cause_by_row(key: AnswerKey) -> dict[tuple[str, str], str]:
 
 
 def _reconcile_all(
-    generated_dir: Path | None, cache_dir: Path | None, allow_network: bool
+    generated_dir: Path | None,
+    cache_dir: Path | None,
+    allow_network: bool,
+    guardrails: GuardrailConfig,
 ) -> tuple[LearningRun, list[tuple[int, float]], ReportingScore]:
     """Run the whole loop batch by batch, timing each.
 
@@ -137,7 +151,8 @@ def _reconcile_all(
         tables = load_batch(batch, generated_dir)
         started = time.perf_counter()
         learned = run_learning_batch(
-            tables, book, cfg, record.store, client, log, finding_log, record.register
+            tables, book, cfg, record.store, client, log, finding_log, record.register,
+            guardrails=guardrails,
         )
         timings.append((tables.rows_read, time.perf_counter() - started))
         record.batches.append(learned)
@@ -155,6 +170,7 @@ def run(
     truth_dir: Path | None = None,
     cache_dir: Path | None = None,
     allow_network: bool = True,
+    guardrails: GuardrailConfig | None = None,
 ) -> Score:
     """Reconcile and learn across every batch, timing each, then score against the key.
 
@@ -163,7 +179,8 @@ def run(
     before anything filled them, and this is the checkpoint that fills them.
     """
     pricing = pricing_from(load_yaml(CONFIG_DIR / "pricing.yaml"))
-    record, timings, surface = _reconcile_all(generated_dir, cache_dir, allow_network)
+    policy = guardrails or guardrail_config_from(thresholds())
+    record, timings, surface = _reconcile_all(generated_dir, cache_dir, allow_network, policy)
     results = record.results
     usage = record.ledger
     accepted = auto_resolutions(record)
@@ -204,6 +221,7 @@ def run(
         queue=build_queue(record.register.claims, corpus_end),
         reporting=surface,
         run=record,
+        guardrails=policy,
     )
 
 
@@ -307,6 +325,7 @@ def to_json(score: Score) -> dict[str, Any]:
     return {
         "batches": [metric.to_json() for metric in score.metrics],
         "totals": _totals(score, precision),
+        "auto_resolution_policy": score.guardrails.to_json(),
         "learning": score.learning.to_json(),
         "claims": score.claims.to_json(),
         "claims_queue": score.queue.to_json(),
@@ -322,7 +341,7 @@ def to_json(score: Score) -> dict[str, Any]:
     }
 
 
-def to_text(score: Score) -> str:
+def to_text(score: Score, overridden: bool = False) -> str:
     quarantine = quarantine_summary(score.results)
     precision = auto_resolution_precision(score.proposals, _cause_by_row(score.key))
     return report.render(
@@ -332,6 +351,7 @@ def to_text(score: Score) -> str:
             report.confusion_table(score.confusion, score.key),
             report.silent_clear_table(silent_clears(score.outcomes), score.key),
             report.auto_resolution(precision, len(score.proposals)),
+            report.auto_resolution_policy(score.guardrails, overridden),
             report.learning(
                 list(score.learning.batches), score.metrics, score.learning.overall_precision
             ),
@@ -353,10 +373,28 @@ def main() -> int:
         "--offline", action="store_true",
         help="never call the API, even with a key set; answer only from data/llm_cache",
     )
+    ceiling_argument(parser)
     args = parser.parse_args()
-    score = run(allow_network=not args.offline)
-    report_text = to_text(score)
+    policy, overridden = policy_from(args)
+    score = run(allow_network=not args.offline, guardrails=policy)
+    report_text = to_text(score, overridden)
     print(report_text, end="")
+
+    # A what-if run prints and stops. RESULTS.md, EXCEPTIONS.md and data/score.json are
+    # the committed record of the shipped policy and the README quotes figures out of
+    # them; letting `--max-variance-inr 5000` rewrite them would put a tuned number
+    # under a filename that claims to be the default one. Changing the *config* is a
+    # policy change and does regenerate them -- that is the difference between deciding
+    # something and trying it.
+    if overridden:
+        print(
+            f"\n--max-variance-inr {policy.default_ceiling.max_variance_inr} was in force, so "
+            "nothing was written.\n"
+            "This is a what-if. To make it the policy, set auto_resolution.max_variance_inr "
+            "(or add a\nmax_variance_overrides entry) in config/thresholds.yaml and run "
+            "`make score` again."
+        )
+        return 0
 
     SCORE_JSON.write_text(json.dumps(to_json(score), indent=2) + "\n", encoding="utf-8")
     # The same report, verbatim, as a committed artifact. The README quotes figures out

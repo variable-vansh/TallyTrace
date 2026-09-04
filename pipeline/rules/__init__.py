@@ -16,7 +16,11 @@ from pipeline.rules.apply import (
     Provenance,
     decide,
 )
-from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
+from pipeline.rules.guardrails import (
+    GuardrailConfig,
+    VarianceCeiling,
+    guardrail_config_from,
+)
 from pipeline.rules.lifecycle import LifecycleConfig, advance, lifecycle_config_from
 from pipeline.rules.models import Observation, Rule, RuleState, Transition, rule_from
 from pipeline.rules.predicates import matches, select, specificity
@@ -26,6 +30,6 @@ from pipeline.rules.store import RuleStore
 __all__ = [
     "AUTO_RESOLVED", "CONFLICTED", "Decision", "GuardrailConfig", "HELD", "LifecycleConfig",
     "Observation", "Proposal", "Provenance", "Rule", "RuleState", "RuleStore", "SHADOWED",
-    "Transition", "UNMATCHED", "advance", "decide", "guardrail_config_from",
+    "Transition", "UNMATCHED", "VarianceCeiling", "advance", "decide", "guardrail_config_from",
     "lifecycle_config_from", "matches", "rule_from", "select", "specificity",
 ]

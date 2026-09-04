@@ -20,6 +20,7 @@ from harness.truth import AnswerKey
 from pipeline.claims.queue import QueueView
 from pipeline.metrics.registry import COUNT, INR, PERCENT, MetricResult
 from pipeline.llm.usage import LlmUsage
+from pipeline.rules.guardrails import ALWAYS_HUMAN_CLASSES, GuardrailConfig
 from pipeline.rules.models import RuleState
 from pipeline.rules.store import RuleStore
 
@@ -216,6 +217,33 @@ def render(sections: list[list[str]]) -> str:
 # --------------------------------------------------------------------------- #
 # Checkpoint 3 — the learning loop
 # --------------------------------------------------------------------------- #
+
+
+def auto_resolution_policy(cfg: GuardrailConfig, overridden: bool) -> list[str]:
+    """The ceilings this run was scored under, printed above the numbers they produced.
+
+    The report has always printed rupees auto-resolved beside rupees escalated so the
+    ratio cannot be quietly inverted. Once the ceiling is a number the business sets,
+    that ratio is only readable next to the policy that produced it -- so the policy
+    is printed too, every run, default or not.
+    """
+    lines = _heading("auto-resolution policy — the ceilings a rule cannot out-confidence")
+    source = "--max-variance-inr (a what-if; config/thresholds.yaml is unchanged)" \
+        if overridden else "config/thresholds.yaml"
+    lines.append(f"       default ceiling  ₹{cfg.default_ceiling.max_variance_inr}   [{source}]")
+    if not cfg.overrides:
+        lines.append("       no per-cause or per-channel ceilings set.")
+    for ceiling in cfg.overrides:
+        who = f"  (set by {ceiling.set_by})" if ceiling.set_by else ""
+        lines.append(f"       ₹{str(ceiling.max_variance_inr):>12}  for {ceiling.scope}{who}")
+        if ceiling.note:
+            lines.append(f"                     {ceiling.note}")
+    lines += [
+        f"       never auto-resolved, whatever a rule believes: "
+        f"{', '.join(sorted(cfg.never_auto_resolve_causes))}",
+        f"       always human, by resolution class: {', '.join(sorted(ALWAYS_HUMAN_CLASSES))}",
+    ]
+    return lines
 
 
 def learning(

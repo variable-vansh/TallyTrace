@@ -493,6 +493,19 @@ check if batch 10 looks unlike the rest.
    curve is the same failure as making batch 1 cleaner, which checkpoint 1 forbids by
    name. It would also have been the most invisible of the three.
 
+**Since.** The ceiling is now a number the business sets — a default plus per-cause and
+per-channel ceilings in `config/thresholds.yaml` — which does not change the reasoning
+above so much as say whose reasoning it is. Option 1 was wrong for *me* to take
+unilaterally to make a curve decline; it is a perfectly legitimate thing for a finance
+lead to decide about their own money, in the open, with the number and their name
+attached to every resolution it closes. `make whatif ceiling=3000` prints what this
+corpus would have done: 233 auto-resolutions instead of 146, ₹158,337 instead of ₹8,203,
+at 99.14% precision instead of 98.63% — with almost all of the movement in exactly the
+batch-10 clawbacks described above. That the precision *rises* is the strongest
+available argument for raising it, and it is still not an argument I get to accept on
+someone else's behalf. The shipped default is unchanged at ₹500, and a what-if writes
+no artifact, so nothing on this page or in `RESULTS.md` describes a tuned run.
+
 **What I did instead.** Reported two series and printed both, with the arithmetic for
 each. `net_review_rate` is rows a human still owns; it is the strict reading and it
 does not decline. `human_touchpoints` is *distinct decisions a human has to make* —
@@ -902,6 +915,53 @@ convenience of naming a path in prose.
 **Fix.** Reworded the docstring to say "the answer key's manifest" and to state which
 module does own the path. The test stayed as it was.
 
+
+### 40. Raising the ceiling improved the precision the product can see and wrecked the one that is true
+
+**What happened.** Asked to try `max_variance_inr: 1000.00` and keep it if it came out
+better, I ran it and it looked better on every number in the report: 162 auto-resolutions
+instead of 146, ₹19,581 closed instead of ₹8,203, the last batch's review rate down from
+22.65% to 19.89%, and **auto-resolution precision up, 98.63% → 98.77%**. I was one commit
+from shipping it.
+
+**Why it mattered.** The 98.77% is *live* precision — a rule judged against the cause the
+operator's own words imply. It is the product's signal and the honest one to build on,
+because it is how the system finds out it was wrong without an oracle. It is not the same
+number as the harness's, which scores the same resolutions against the answer key the
+pipeline never reads. At ₹500 the two are identical. At ₹1,000 the true figure is
+**95.68%** — seven rows closed with the wrong cause instead of two.
+
+The report prints both, and I read the wrong one first because it was the one in the
+learning section next to everything else that had improved.
+
+**The curve, from `make ceilings`:**
+
+| ceiling | closed | wrong | true % | live % | gap |
+|---|---|---|---|---|---|
+| ₹500 | 146 | 2 | 98.63 | 98.63 | 0.00 |
+| ₹600 | 149 | 2 | **98.66** | 98.66 | 0.00 |
+| ₹700 | 155 | 4 | 97.42 | 98.71 | 1.29 |
+| ₹1,000 | 162 | 7 | 95.68 | 98.77 | 3.09 |
+| ₹2,000 | 202 | 21 | 89.60 | 99.01 | 9.41 |
+| ₹3,000 | 233 | 30 | 87.12 | **99.14** | 12.02 |
+
+Live precision rises monotonically with the ceiling and true precision falls. That is not
+noise, it is failure #22 at scale: the marginal rows are ones a rule and an operator get
+wrong in the *same direction*, and the bigger the row the more often they agree wrongly.
+A ceiling chosen on live precision alone rises forever, and every step of the way the
+system reports that it is getting better at it.
+
+**Fix.** `tools/ceiling_sweep.py` scores the corpus at every candidate ceiling and prints
+both series side by side, and the threshold control on Report & Settings will not render
+one without the other. The ceiling stayed at ₹500. ₹600 is the frontier — it closes three
+more rows with the same two errors and the two measures still agree — and it is left as
+the operator's call rather than taken as mine, which is the whole point of having made the
+number settable.
+
+**What I would have shipped otherwise.** A guardrail loosened by 2×, five more wrong
+resolutions in the corpus, and a README claiming precision had improved. Every number in
+that claim would have been real.
+
 ### 37. Two things the checkpoint-4 audit found that the tests were happy with
 
 **A claim could in principle be opened and closed in the same batch.** Ordering inside
@@ -928,6 +988,6 @@ domain and starts describing the fixture.
 | Pinned metrics recompute with no LLM call | **Yes**, and asserted rather than asserted-in-prose: `tests/test_pins.py` monkeypatches `LlmClient.__init__`, `LlmClient.ask`, `client_from` and `ResponseCache.get` to raise, then recomputes all five pins. |
 | Registry refuses unmappable questions instead of guessing | **Yes.** 8 of 11 logged questions map, 1 clarifies, 2 refuse. The schema rejects an outcome that refuses and names a metric at the same time, so a refusal cannot carry a chart. |
 | Every number in the README traced to a run | **Yes**, and enforced: `tests/test_readme.py` checks the opening claim, the headline table, the benchmark row, the review-series endpoints and the ₹34-lakh gap against `data/score.json` and the metric registry. It also fails if the stated test count is wrong. |
-| `EXCEPTIONS.md` and `FAILURES.md` real and non-empty | **Yes.** EXCEPTIONS.md is 666 itemised findings plus the open and expired claim registers; FAILURES.md is 39 entries kept since checkpoint 1, none reconstructed. |
+| `EXCEPTIONS.md` and `FAILURES.md` real and non-empty | **Yes.** EXCEPTIONS.md is 666 itemised findings plus the open and expired claim registers; FAILURES.md is 40 entries kept since checkpoint 1, none reconstructed. |
 | Architecture diagram organised on the AI boundary | **Yes.** Four shaded nodes, everything else labelled "deterministic by choice", mermaid plus an ASCII fallback. The mermaid source was parsed with mermaid 11 before committing rather than eyeballed. |
 | Video recorded, ending on the unresolved exception | **No.** `VIDEO.md` holds the shot list and the script with every figure sourced to a command, and beat 7 ends on the expired-claims table and a bank credit nobody can explain. The recording has not happened and the README says so under Limitations. |
