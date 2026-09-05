@@ -22,6 +22,7 @@ from pipeline.metrics.registry import COUNT, INR, PERCENT, MetricResult
 from pipeline.llm.usage import LlmUsage
 from pipeline.rules.guardrails import ALWAYS_HUMAN_CLASSES, GuardrailConfig
 from pipeline.rules.models import RuleState
+from pipeline.learn import LearningRun
 from pipeline.rules.store import RuleStore
 
 RULE = "-" * 78
@@ -291,6 +292,43 @@ def learning(
         "       'held' is a case a rule matched and a guardrail refused to automate. Those",
         "       rows still belong to a human, and they are collapsed into one card rather",
         "       than N exceptions — which is why the two series diverge.",
+    ]
+    return lines
+
+
+def evidence_gate(run: LearningRun, min_support: int) -> list[str]:
+    """What the backtest threw away before a human was asked to look at it.
+
+    Printed because it is the number that separates a system that induces rules from
+    one that induces rules it can defend, and because it is the cost side of the
+    ledger: most of what the ladder proposes is supposed to die here.
+    """
+    lines = _heading("evidence gate — candidates scored, admitted, discarded")
+    lines.append(
+        f"{'batch':>5} {'candidates':>11} {'admitted':>9} {'discarded':>10} {'demonstrations':>15}"
+    )
+    admitted = discarded = 0
+    for batch in run.batches:
+        cards, binned = len(batch.candidate_cards), len(batch.candidates_discarded)
+        if cards == 0 and binned == 0:
+            continue
+        admitted += cards
+        discarded += binned
+        demos = sum(len(card.demonstration_ids) for card in batch.candidate_cards)
+        lines.append(
+            f"{batch.batch:>5} {cards + binned:>11} {cards:>9} {binned:>10} {demos:>15}"
+        )
+    total = admitted + discarded
+    approved = sum(1 for rule in run.store.rules if rule.approved)
+    lines += [
+        RULE,
+        f"       {total} candidates scored against the full history of resolved exceptions.",
+        f"       {discarded} discarded below the {min_support}-demonstration support floor,",
+        f"       {admitted} put in front of a human, {approved} approved.",
+        "",
+        "       Support counts distinct operator demonstrations, never rows. Eighty rows",
+        "       cleared by one sentence is one piece of evidence, and a rule standing on",
+        "       one demonstration backtests at 100% on the row it came from by construction.",
     ]
     return lines
 

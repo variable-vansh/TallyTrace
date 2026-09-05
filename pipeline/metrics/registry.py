@@ -76,11 +76,16 @@ class MetricResult:
     """One computed answer, and enough context to render it without asking anything else."""
 
     metric_id: str
+    version: int
     title: str
     unit: str
     group_by: str
     points: tuple[MetricPoint, ...]
     params: MetricParams
+    #: Settlement rows the figure was derived from. A preview shows this next to the
+    #: number, because a total over nine rows and the same total over nine hundred are
+    #: not the same claim.
+    row_count: int = 0
 
     @property
     def total(self) -> Decimal:
@@ -90,10 +95,12 @@ class MetricResult:
     def to_json(self) -> dict[str, Any]:
         return {
             "metric_id": self.metric_id,
+            "version": self.version,
             "title": self.title,
             "unit": self.unit,
             "group_by": self.group_by,
             "params": self.params.to_json(),
+            "row_count": self.row_count,
             "points": [point.to_json() for point in self.points],
             "total": str(self.total) if self.unit != PERCENT else None,
         }
@@ -113,6 +120,12 @@ class Metric:
     unit: str
     groupings: tuple[str, ...]
     compute: Callable[[Corpus, MetricParams], tuple[MetricPoint, ...]]
+    #: Bumped whenever the *definition* changes -- a different denominator, a changed
+    #: filter. The registered function is this system's compiled artifact (there is no
+    #: SQL and no database), so the version is what lets a pinned figure say which
+    #: definition produced it. A pin that recomputes under a new version is answering
+    #: a subtly different question, and that has to be legible rather than silent.
+    version: int = 1
 
     def run(self, corpus: Corpus, params: MetricParams) -> MetricResult:
         if params.group_by not in self.groupings:
@@ -123,16 +136,19 @@ class Metric:
         window = corpus.window(params.from_batch, params.to_batch)
         return MetricResult(
             metric_id=self.metric_id,
+            version=self.version,
             title=self.title,
             unit=self.unit,
             group_by=params.group_by,
             points=self.compute(window, params),
             params=params,
+            row_count=window.row_count,
         )
 
     def to_json(self) -> dict[str, Any]:
         return {
             "metric_id": self.metric_id,
+            "version": self.version,
             "title": self.title,
             "description": self.description,
             "unit": self.unit,

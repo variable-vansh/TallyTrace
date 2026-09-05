@@ -161,6 +161,16 @@ class Corpus:
         seen = {channel for entry in self.facts for channel in entry.gross_order_value}
         return tuple(sorted(seen))
 
+    @property
+    def row_count(self) -> int:
+        """Settlement rows this corpus covers.
+
+        Shown beside a previewed figure so a number arrives with the size of the thing
+        it was computed from. "₹4.2 lakh" over nine rows and over nine hundred are
+        different claims, and only one of them is worth pinning.
+        """
+        return sum(count for entry in self.facts for count in entry.settlement_rows.values())
+
     def window(self, from_batch: int | None, to_batch: int | None) -> "Corpus":
         """A narrower corpus. Metrics take date ranges as batch ranges; a batch is a week."""
         low = from_batch or min(self.batches, default=1)

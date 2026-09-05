@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from pipeline.cases import ExceptionCase, FindingLog, build_cases
+from pipeline.claims.clock import bucket_config_from
 from pipeline.claims.deadlines import deadline_config_from
 from pipeline.claims.drafting import drafter_for
 from pipeline.claims.models import Claim
@@ -107,6 +108,7 @@ def new_register() -> ClaimRegister:
     return ClaimRegister(
         deadlines=deadline_config_from(cfg),
         rounding_tolerance_inr=Decimal(cfg["matching"]["rounding_tolerance_inr"]),
+        buckets=bucket_config_from(cfg),
     )
 
 
@@ -484,7 +486,7 @@ def _advance_claims(
         batch=tables.batch,
         batch_end=batch_window(tables.batch)[1],
         settlements=tables.settlements,
-        routed=route(decisions, hypotheses, routes),
+        routed=route(decisions, hypotheses, routes, register.deadlines),
         resolution_class_by_cause=routes,
         resolutions=resolutions,
         drafter=drafter_for(words, cases_by_id),

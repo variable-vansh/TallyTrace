@@ -37,6 +37,10 @@ class Pin:
     pinned_by: str
     pinned_at: str                 # ISO date, fixed in the file so a rerun is reproducible
     source_question: str           # what was typed. Never read by the computation.
+    #: The metric definition in force when this was pinned. Recomputing under a later
+    #: version is answering a subtly different question, and :func:`recompute` says so
+    #: rather than quietly returning the new number under the old name.
+    metric_version: int = 1
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,7 @@ class Pin:
             "pinned_by": self.pinned_by,
             "pinned_at": self.pinned_at,
             "source_question": self.source_question,
+            "metric_version": self.metric_version,
         }
 
 
@@ -65,6 +70,7 @@ def _from_json(payload: dict[str, Any]) -> Pin:
         pinned_by=str(payload["pinned_by"]),
         pinned_at=str(payload["pinned_at"]),
         source_question=str(payload.get("source_question", "")),
+        metric_version=int(payload.get("metric_version", 1)),
     )
 
 
@@ -93,3 +99,17 @@ def save(pins: list[Pin], path: Path | None = None) -> None:
 def recompute(pins: list[Pin], corpus: Corpus) -> list[tuple[Pin, MetricResult]]:
     """Every pinned metric, recomputed. Deterministic, and there is no model in this call."""
     return [(pin, compute(pin.metric_id, corpus, pin.params)) for pin in pins]
+
+
+def stale(pins: list[Pin]) -> list[tuple[Pin, int]]:
+    """Pins whose metric definition has moved on since they were pinned.
+
+    Returned rather than auto-upgraded. A pin is a question somebody asked; if the
+    definition behind it has changed, the honest move is to say so and let them look,
+    not to keep the name and quietly serve a different number under it.
+    """
+    return [
+        (pin, get(pin.metric_id).version)
+        for pin in pins
+        if get(pin.metric_id).version != pin.metric_version
+    ]

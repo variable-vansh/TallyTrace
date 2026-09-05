@@ -31,6 +31,34 @@ every run.
 | Model spend | ₹160.13 total, **₹0.13 per settlement row** |
 | Open, unresolved, itemised | **666 exceptions, ₹498,604.90** — see [EXCEPTIONS.md](EXCEPTIONS.md) |
 
+### Before and after the evidence gate
+
+The loop originally induced one rule per resolution and let it start predicting in the
+batch it was born in — one sentence, one rule, no evidence in between. It now ladders
+each reading into up to three candidates, backtests them against every exception the
+operator has already resolved, discards those below the support floor, and asks a human
+before any of them predicts. Both runs are on the same corpus and the same fixtures:
+
+| | before | after |
+|---|---|---|
+| Candidates ever scored | — | 87 |
+| Discarded below the support floor | — | **41** |
+| Put in front of a human | 31 | 46 (20 approved, 26 rejected) |
+| Rules that ever act | 9 active | 9 active |
+| Auto-resolution precision | 98.63% | **98.63%** |
+| Human decisions per batch | 22.03% → 6.08% | **22.03% → 6.08%** |
+| Cases closed without a human | 146 | 146 |
+
+**The gate does not move the outcome, and that is the honest finding.** Precision, the
+review curve and the number of cases closed are identical — because what a rule is
+allowed to *do* was already decided by the lifecycle and the guardrails underneath it.
+What the gate changes is how much unsupported material reaches a person, and what the
+system can say when asked why a rule exists. `min_support_demonstrations` was run at 1,
+2 and 3 before it was set: all three produce the same precision and the same curve, and
+they differ only in how many candidates survive (77 / 46 / 34). It ships at 2 because 3
+delays the loose `rto_reversal` rule far enough that nothing retires inside ten batches,
+and the retirement is worth more than the shorter queue.
+
 The two rows separating 98.63% from 100% are the two deliberate near-misses planted in
 the dataset. Nothing hides them. [FAILURES.md](FAILURES.md) #21 explains the one done
 condition this build does not fully meet and the three shortcuts that would have met it.
@@ -508,7 +536,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      407 test functions, 441 cases
+tests/      464 test functions, 507 cases
 ```
 
 Four artifacts leave a run and all four are committed: `EXCEPTIONS.md` (what it could not
@@ -757,6 +785,22 @@ Promotion out of shadow then needs both `promotion_min_confirmations` **and**
 `promotion_min_precision`; volume alone is not evidence, and a shadow prediction nobody
 has ruled on is not a confirmation.
 
+**Two ways out of `active`, and they are different signals.** *Retirement* is slow
+statistical decay — live precision under `retirement_precision_floor` over enough
+observations to mean something — and it is terminal. *Demotion* is fast human
+disagreement: an operator has corrected a rule while it was acting,
+`max_overrides_before_demotion` times, and it stops acting now rather than once the
+average catches up. Demotion returns the rule to shadow, where it keeps predicting and
+can earn its way back through the ordinary gate; the overrides that cost it are not
+charged twice, or it would fall straight back out on re-promotion. Both are config, so
+changing what the business tolerates is an edit rather than a deploy. Only shadow-state
+mistakes are exempt — shadow is where a rule is *supposed* to be wrong.
+
+**Nothing demotes in this corpus.** The rules that survive the evidence gate and reach
+`active` run at 100% live precision here, so no rule accumulates two operator overrides.
+The path is exercised in `tests/test_lifecycle.py`, not in the shipped run, and saying
+otherwise would be claiming a mechanism fired that did not.
+
 Retirement is automatic and it is shown, not hidden. **R-10** was induced in batch 2
 from a note that generalised across every marketplace, predicted on six late deductions
 in batch 3, was contradicted by the operator's own Amazon resolutions, and retired
@@ -930,9 +974,33 @@ clock:
   screen for eleven months of the year. In this corpus `CLM-0005` is that case — ₹19.51,
   expired 2025-07-10, the earliest expiry in the whole register.
 
+Which shape applies is **data, not code**. `claims.deadline_policy` in
+`config/thresholds.yaml` is a table of rows, each naming a scope, a `rule`
+(`days_from_event` or `day_of_next_month`) and a value. Adding a channel is adding a row;
+no function names a platform. A row naming a `claim_type` beats one naming only a
+`channel`, which is what stops a TCS discrepancy on Flipkart borrowing Flipkart's 30-day
+commercial window and gaining twenty days the GSTR-8 return does not give it. Malformed
+rows — an unknown rule, a scope set twice, a row scoping nothing — fail at load rather
+than at claim-opening time.
+
 A platform with no configured window gets **no clock at all**, sorted last, labelled "no
 configured filing window". A default would be a countdown no agreement backs, in a queue
 whose entire value is its countdown.
+
+**The clock runs on a schedule and is idempotent.** `ClaimRegister.tick(as_of)`
+recomputes days remaining for every open claim, rebuckets it, and expires the lapsed
+ones. Running it twice on the same day is a no-op the second time, and running a batch
+twice returns the record it already wrote — not by a dedupe further down, but because
+the register records what it has already done. A scheduled job is retried as a matter of
+course, and a retry that double-expires a claim turns an ordinary retry into a write-off.
+
+**Buckets are sized to the batch cadence, not to calendar intuition.** Red is 7 days or
+fewer, amber 8–14, green beyond that, from `claims.buckets`. Batches are weekly, so a
+three-day red bucket would never be observed: a claim would pass from comfortable to
+expired between two runs without ever being shown as urgent. Escalation is *that bucket*
+rather than a status — a claim does not stop being `open` because its clock got short,
+and putting urgency in the status set would mean a claim could be "escalated" or
+"drafted" but never legibly both.
 
 **The queue is sorted by expiry, never by creation date.** A claims list ordered by when
 it was raised puts the newest work on top and buries the one that stops being recoverable
@@ -1038,6 +1106,25 @@ commission_share_of_gross     exception_count_by_cause    review_rate_trend
 auto_resolved_rows            claim_recovery_rate         open_claim_value
 rupees_expired_unrecovered
 ```
+
+**Refusal is a lookup, not a sentence the model wrote.** The schema already stops the
+model naming an unregistered metric, but a refusal written by the thing being refused is
+a courtesy rather than a check — and the schema cannot stop a *grouping* a metric does
+not declare. So `pipeline/metrics/vocabulary.py` holds the closed set as data and refuses
+deterministically: every slot is checked by lookup, and an unsupported term produces a
+refusal that **names the term** and lists what was available instead. No nearest match,
+no partial fulfilment, no plausible adjacent chart. The model's own sentence is still
+shown where it wrote one, as commentary on a decision made elsewhere.
+
+**Every artifact that acts carries a version.** A rule, a registered metric and a pin
+each have one, and every provenance record names the rule id *and* the version that
+fired. An id alone cannot answer "what did this rule say when it closed that row?" once
+the rule has been narrowed since. A pin records the metric definition it was pinned
+under, and a pin whose definition has moved on is reported rather than silently
+upgraded — keeping the name and quietly serving a different number under it is the
+failure worth designing against. There is no SQL and no database here, so the registered
+pure function *is* the compiled artifact, and its version is what makes a pinned figure
+say which definition produced it.
 
 **No SQL is generated anywhere.** Enterprise text-to-SQL execution accuracy runs roughly
 21–39% on realistic schemas, and the failures are the dangerous kind: a valid query

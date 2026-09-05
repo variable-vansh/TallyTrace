@@ -145,6 +145,7 @@ def test_a_rules_prediction_wins_over_the_models_hypothesis() -> None:
         case=case,
         provenance=Provenance(
             case_id=case.case_id, batch=1, outcome="shadow_prediction", rule_id="R-01",
+            rule_version=1,
             rule_state_at_fire="shadow", source_resolution_id=None, source_operator=None,
             proposed_cause="missing_settlement_row", guardrails_evaluated=(),
             guardrail_detail=(), note="",
@@ -155,6 +156,7 @@ def test_a_rules_prediction_wins_over_the_models_hypothesis() -> None:
         case=case,
         provenance=Provenance(
             case_id=case.case_id, batch=1, outcome=UNMATCHED, rule_id=None,
+            rule_version=None,
             rule_state_at_fire=None, source_resolution_id=None, source_operator=None,
             proposed_cause=None, guardrails_evaluated=(), guardrail_detail=(), note="",
         ),

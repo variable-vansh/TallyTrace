@@ -11,18 +11,18 @@ TALLYTRACE — SCORE REPORT
 THROUGHPUT
 ------------------------------------------------------------------------------
 batch   records   settle   seconds     rec/s    tokens     ₹/txn
-    1       244       59     0.021     11609     17127      0.16
-    2       184       75     0.020      9186     20939      0.16
-    3       195       87     0.027      7196     27078      0.18
-    4       225      102     0.030      7386     34007      0.21
-    5       240      114     0.038      6373     39869      0.22
-    6       269      128     0.031      8779     35580      0.16
-    7       301      141     0.037      8120     40671      0.18
-    8       283      155     0.039      7280     46199      0.19
-    9       245      168     0.042      5836     51980      0.20
-   10       223      181     0.044      5037     66345      0.24
+    1       244       59     0.034      7169     17127      0.16
+    2       184       75     0.059      3136     20939      0.16
+    3       195       87     0.074      2640     27078      0.18
+    4       225      102     0.076      2947     34007      0.21
+    5       240      114     0.093      2576     39869      0.22
+    6       269      128     0.082      3292     35580      0.16
+    7       301      141     0.052      5771     40671      0.18
+    8       283      155     0.056      5036     46199      0.19
+    9       245      168     0.055      4490     51980      0.20
+   10       223      181     0.066      3399     66345      0.24
 ------------------------------------------------------------------------------
-  all      2409     1210     0.329      7319    379795
+  all      2409     1210     0.646      3727    379795
        model claude-opus-5, rates from config/pricing.yaml.
        TOKEN COUNTS ARE ESTIMATED. Some cached answers were recorded from a
        transcript rather than metered by the API, so their token counts are
@@ -143,6 +143,27 @@ batch  queue  auto  held   esc  precision  ₹ auto-resolved    ₹ escalated  l
        'held' is a case a rule matched and a guardrail refused to automate. Those
        rows still belong to a human, and they are collapsed into one card rather
        than N exceptions — which is why the two series diverge.
+
+EVIDENCE GATE — CANDIDATES SCORED, ADMITTED, DISCARDED
+------------------------------------------------------------------------------
+batch  candidates  admitted  discarded  demonstrations
+    1          13         7          6              22
+    2          12         9          3              18
+    3          13         7          6              19
+    4          19         9         10              32
+    5           5         5          0              10
+    6           5         0          5               0
+    7           8         2          6               6
+    8           2         2          0               4
+    9          10         5          5              10
+------------------------------------------------------------------------------
+       87 candidates scored against the full history of resolved exceptions.
+       41 discarded below the 2-demonstration support floor,
+       46 put in front of a human, 20 approved.
+
+       Support counts distinct operator demonstrations, never rows. Eighty rows
+       cleared by one sentence is one piece of evidence, and a rule standing on
+       one demonstration backtests at 100% on the row it came from by construction.
 
 ABSTENTION — THE CAUSES HELD OUT OF THE CORPUS UNTIL LATE
 ------------------------------------------------------------------------------

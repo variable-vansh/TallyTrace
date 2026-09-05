@@ -63,6 +63,7 @@ from pipeline.rules import resolutions as operator_log
 from pipeline.rules.backtest import Demonstration
 from pipeline.rules import store as rule_store
 from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
+from pipeline.rules.lifecycle import lifecycle_config_from
 from pipeline.rules.models import RuleState
 from pipeline.run import OpenBook, run_batch
 
@@ -362,6 +363,9 @@ def to_text(score: Score, overridden: bool = False) -> str:
             report.auto_resolution_policy(score.guardrails, overridden),
             report.learning(
                 list(score.learning.batches), score.metrics, score.learning.overall_precision
+            ),
+            report.evidence_gate(
+                score.run, lifecycle_config_from(thresholds()).min_support_demonstrations
             ),
             report.abstention(list(score.learning.abstentions)),
             report.rules(score.run.store, list(score.learning.rule_truth)),

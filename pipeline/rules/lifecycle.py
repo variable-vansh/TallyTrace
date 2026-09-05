@@ -32,9 +32,11 @@ class LifecycleConfig:
     retirement_precision_floor: Decimal
     retirement_min_observations: int
     #: Distinct operator demonstrations a rule needs before it may predict at all.
-    #: The gate on the *entrance* to the lifecycle, where the other four govern
-    #: movement inside it.
+    #: The gate on the *entrance* to the lifecycle, where the others govern movement
+    #: inside it.
     min_support_demonstrations: int
+    #: Human overrides of an acting rule before it is put back into shadow.
+    max_overrides_before_demotion: int
 
 
 def lifecycle_config_from(thresholds: dict[str, Any]) -> LifecycleConfig:
@@ -45,6 +47,7 @@ def lifecycle_config_from(thresholds: dict[str, Any]) -> LifecycleConfig:
         retirement_precision_floor=Decimal(section["retirement_precision_floor"]),
         retirement_min_observations=int(section["retirement_min_observations"]),
         min_support_demonstrations=int(section["min_support_demonstrations"]),
+        max_overrides_before_demotion=int(section["max_overrides_before_demotion"]),
     )
 
 
@@ -83,9 +86,21 @@ def _admit(rule: Rule, batch: int, cfg: LifecycleConfig) -> Rule:
 def advance(rule: Rule, batch: int, cfg: LifecycleConfig) -> Rule:
     """One rule's state at the end of a batch, given everything it has been told.
 
-    Evaluated in severity order: retirement is checked before promotion, so a rule
-    whose record qualifies it for both goes to retired. A rule that is doing badly
-    enough to retire must not be promoted by the same numbers.
+    Evaluated in severity order: retirement, then demotion, then promotion. A rule
+    whose record qualifies it for more than one goes to the most severe -- a rule
+    doing badly enough to retire must not be promoted by the same numbers.
+
+    **Retirement and demotion are different signals and both exist.** Retirement is
+    slow statistical decay: live precision under the floor, measured over enough
+    observations to mean something, and it is terminal. Demotion is fast human
+    disagreement: an operator has corrected this rule while it was acting, more times
+    than the business allows, and it stops acting now rather than once the average
+    catches up. Demotion is recoverable -- the rule returns to shadow, keeps
+    predicting, and can come back through the ordinary promotion gate.
+
+    Both are driven by ``config/thresholds.yaml`` and take effect on the next batch,
+    so changing what the business tolerates is an edit to a config file rather than a
+    deploy.
     """
     if rule.state is RuleState.RETIRED:
         return rule
@@ -102,6 +117,16 @@ def advance(rule: Rule, batch: int, cfg: LifecycleConfig) -> Rule:
             RuleState.RETIRED, batch,
             f"live precision {precision:.2%} over {judged} judged observations is below the "
             f"{cfg.retirement_precision_floor:.0%} floor",
+        )
+
+    if rule.state is RuleState.ACTIVE and (
+        rule.overrides_since_demotion >= cfg.max_overrides_before_demotion
+    ):
+        return rule.demoting(
+            batch,
+            f"{rule.overrides_since_demotion} human overrides while active, at or above "
+            f"the {cfg.max_overrides_before_demotion} allowed; back to shadow, where it "
+            "keeps predicting and can earn its way back",
         )
 
     if rule.state is RuleState.PROPOSED:

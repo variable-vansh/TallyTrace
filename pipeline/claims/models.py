@@ -23,6 +23,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+from pipeline.claims.clock import is_escalated
 from pipeline.claims.deadlines import Deadline
 
 ZERO = Decimal("0.00")
@@ -92,6 +93,12 @@ class Claim:
     case_ids: tuple[str, ...] = ()
     #: What the cause came from: a learned rule's prediction, or the model's hypothesis.
     cause_source: str = "hypothesis"
+    #: Where the clock has put this claim: red, amber, green, unclocked or expired.
+    #: Stamped by ``ClaimRegister.tick``. A *bucket*, deliberately not a status --
+    #: a claim does not stop being ``open`` because its window got short, and putting
+    #: urgency in the status set would mean a claim could be "escalated" or "drafted"
+    #: but never legibly both.
+    bucket: str = "unclocked"
     transitions: tuple[ClaimTransition, ...] = field(default_factory=tuple)
 
     # -- queries ----------------------------------------------------------- #
@@ -162,5 +169,7 @@ class Claim:
             "source_resolution_id": self.source_resolution_id,
             "case_ids": list(self.case_ids),
             "cause_source": self.cause_source,
+            "bucket": self.bucket,
+            "escalated": is_escalated(self.bucket),
             "transitions": [t.to_json() for t in self.transitions],
         }

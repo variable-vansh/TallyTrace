@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from pipeline.cases import ExceptionCase
-from pipeline.claims.deadlines import STATUTORY_CAUSES
+from pipeline.claims.deadlines import DeadlineConfig, deadline_config_from
 from pipeline.claims.models import Evidence
 from pipeline.llm.schemas import Hypothesis
 from pipeline.rules.apply import Decision
@@ -61,13 +61,35 @@ def cause_of(decision: Decision, hypothesis: Hypothesis | None) -> tuple[str | N
     return None, FROM_HYPOTHESIS
 
 
-def is_claimable(cause: str | None, resolution_class: str | None, case: ExceptionCase) -> bool:
-    """Does this case belong in the claims register?"""
+def is_claimable(
+    cause: str | None,
+    resolution_class: str | None,
+    case: ExceptionCase,
+    clocked: frozenset[str] | None = None,
+) -> bool:
+    """Does this case belong in the claims register?
+
+    ``clocked`` is the set of causes the deadline policy gives a window to by name --
+    a ``tax_review`` cause is not a claim anyone files, but if the table puts a
+    statutory cutoff on it then it belongs in the register for that clock and nothing
+    else. Passed in rather than imported as a constant so that giving a cause a
+    deadline is one row in ``config/thresholds.yaml``. Defaults to the configured
+    policy, which is what every caller in the pipeline passes anyway.
+    """
     if cause is None or resolution_class is None:
         return False
     if case.features.direction not in CLAIMABLE_DIRECTIONS:
         return False
-    return resolution_class == COUNTERPARTY_CLAIM or cause in STATUTORY_CAUSES
+    if resolution_class == COUNTERPARTY_CLAIM:
+        return True
+    return cause in (_configured_clocked() if clocked is None else clocked)
+
+
+def _configured_clocked() -> frozenset[str]:
+    """The clocked causes from the shipped policy. Imported late to keep this pure-ish."""
+    from pipeline.config import thresholds
+
+    return deadline_config_from(thresholds()).clocked_claim_types
 
 
 def evidence_of(case: ExceptionCase) -> tuple[Evidence, ...]:
@@ -81,17 +103,19 @@ def route(
     decisions: list[Decision],
     hypotheses: Mapping[str, Hypothesis],
     resolution_class_by_cause: Mapping[str, str],
+    deadlines: DeadlineConfig | None = None,
 ) -> list[tuple[ExceptionCase, str, str]]:
     """Every case in this batch that belongs in the register: (case, cause, source).
 
     Stable order, by case id, because the claim ids are handed out in the order this
     returns and a claim id that moves between runs is not an identifier.
     """
+    clocked = None if deadlines is None else deadlines.clocked_claim_types
     routed: list[tuple[ExceptionCase, str, str]] = []
     for decision in sorted(decisions, key=lambda d: d.case.case_id):
         case = decision.case
         cause, source = cause_of(decision, hypotheses.get(case.case_id))
         klass = None if cause is None else resolution_class_by_cause.get(cause)
-        if cause is not None and is_claimable(cause, klass, case):
+        if cause is not None and is_claimable(cause, klass, case, clocked):
             routed.append((case, cause, source))
     return routed

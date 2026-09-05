@@ -12,12 +12,21 @@ left would be the same failure in the other direction.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Any, Iterable
 
+from pipeline.claims.clock import (
+    UNCLOCKED,
+    BucketConfig,
+    bucket_config_from,
+    bucket_for,
+    is_escalated,
+)
 from pipeline.claims.models import Claim
+from pipeline.config import thresholds
 
 ZERO = Decimal("0.00")
 
@@ -31,9 +40,19 @@ class QueueRow:
 
     claim: Claim
     days_remaining: int | None
+    bucket: str = UNCLOCKED
+
+    @property
+    def escalated(self) -> bool:
+        return is_escalated(self.bucket)
 
     def to_json(self) -> dict[str, Any]:
-        return {**self.claim.to_json(), "days_remaining": self.days_remaining}
+        return {
+            **self.claim.to_json(),
+            "days_remaining": self.days_remaining,
+            "bucket": self.bucket,
+            "escalated": self.escalated,
+        }
 
 
 @dataclass(frozen=True)
@@ -46,6 +65,14 @@ class QueueView:
     soonest_days: int | None
     expiring_count: int
     unclocked_count: int
+    #: How many open claims sit in each bucket. The amber and red counts are the
+    #: escalation signal -- see ``pipeline/claims/clock.py`` on why urgency is a
+    #: bucket and not a status.
+    bucket_counts: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def escalated_count(self) -> int:
+        return sum(count for bucket, count in self.bucket_counts if is_escalated(bucket))
 
     @property
     def header(self) -> str:
@@ -66,14 +93,26 @@ class QueueView:
             "soonest_days": self.soonest_days,
             "expiring_count": self.expiring_count,
             "unclocked_count": self.unclocked_count,
+            "bucket_counts": {bucket: count for bucket, count in self.bucket_counts},
+            "escalated_count": self.escalated_count,
             "rows": [row.to_json() for row in self.rows],
         }
 
 
-def build(claims: Iterable[Claim], as_of: date) -> QueueView:
-    """Every open claim, soonest expiry first."""
+def build(claims: Iterable[Claim], as_of: date, buckets: BucketConfig | None = None) -> QueueView:
+    """Every open claim, soonest expiry first, each in the bucket its clock puts it in.
+
+    ``buckets`` defaults to the shipped policy so that every caller renders the same
+    urgency the clock job stamped. Passing one is how a test asks what a different
+    boundary would look like.
+    """
+    cfg = buckets or bucket_config_from(thresholds())
     rows = [
-        QueueRow(claim=claim, days_remaining=claim.days_remaining(as_of))
+        QueueRow(
+            claim=claim,
+            days_remaining=claim.days_remaining(as_of),
+            bucket=bucket_for(claim.days_remaining(as_of), cfg),
+        )
         for claim in claims
         if claim.is_open
     ]
@@ -81,6 +120,7 @@ def build(claims: Iterable[Claim], as_of: date) -> QueueView:
 
     clocked = [row.days_remaining for row in rows if row.days_remaining is not None]
     soonest = min(clocked) if clocked else None
+    tally = Counter(row.bucket for row in rows)
     return QueueView(
         as_of=as_of,
         rows=tuple(rows),
@@ -88,4 +128,5 @@ def build(claims: Iterable[Claim], as_of: date) -> QueueView:
         soonest_days=soonest,
         expiring_count=sum(1 for day in clocked if day == soonest),
         unclocked_count=sum(1 for row in rows if row.days_remaining is None),
+        bucket_counts=tuple(sorted(tally.items())),
     )

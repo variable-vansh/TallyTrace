@@ -58,7 +58,8 @@ def test_recomputing_twice_gives_the_same_numbers(scored, no_model) -> None:
 def test_a_pin_stores_the_definition_and_never_the_numbers() -> None:
     payload = load()[0].to_json()
     assert set(payload) == {
-        "pin_id", "name", "metric_id", "params", "pinned_by", "pinned_at", "source_question"
+        "pin_id", "name", "metric_id", "metric_version", "params", "pinned_by",
+        "pinned_at", "source_question",
     }
     assert "points" not in payload and "value" not in payload
 
@@ -116,3 +117,55 @@ def test_the_pinned_dashboard_matches_what_the_scored_run_reported(scored) -> No
 def test_a_pinned_percentage_is_still_a_decimal(scored, no_model) -> None:
     for _, result in recompute(load(), scored.reporting.corpus):
         assert all(isinstance(point.value, Decimal) for point in result.points)
+
+
+# --------------------------------------------------------------------------- #
+# A model version change cannot move a pinned number
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "model_version",
+    ["claude-opus-4-1-20250805", "claude-sonnet-4-5-20250929", "a-model-that-does-not-exist"],
+)
+def test_a_pinned_metric_is_identical_across_model_versions(
+    scored, no_model, monkeypatch: pytest.MonkeyPatch, model_version: str
+) -> None:
+    """The acceptance check, and the sentence worth saying precisely: the model is
+    present at the moment of definition and absent from every run afterwards.
+
+    The pinned value is recomputed with ``config/pricing.yaml`` naming a different
+    model each time, and with every route to the client poisoned. If a pinned figure
+    could move when the model changed, the dashboard would be a thing that quietly
+    re-answers last quarter's question with this quarter's model.
+    """
+    from pipeline import config as config_module
+
+    baseline = {
+        pin.pin_id: result.to_json() for pin, result in recompute(load(), scored.reporting.corpus)
+    }
+
+    real = config_module.load_yaml
+
+    def with_model(path):
+        loaded = real(path)
+        if "model" in loaded and "estimated_chars_per_token" in loaded:
+            return {**loaded, "model": model_version}
+        return loaded
+
+    monkeypatch.setattr(config_module, "load_yaml", with_model)
+    config_module.thresholds.cache_clear()
+
+    after = {
+        pin.pin_id: result.to_json() for pin, result in recompute(load(), scored.reporting.corpus)
+    }
+    config_module.thresholds.cache_clear()
+
+    assert after == baseline, f"a pinned metric moved when the model became {model_version}"
+
+
+def test_a_pinned_result_reports_the_row_count_it_was_derived_from(scored, no_model) -> None:
+    """A figure arrives with the size of the thing it was computed from."""
+    for _pin, result in recompute(load(), scored.reporting.corpus):
+        assert result.row_count > 0
+        assert result.to_json()["row_count"] == result.row_count

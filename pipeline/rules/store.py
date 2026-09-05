@@ -93,6 +93,7 @@ def _rule_from_json(payload: dict[str, Any]) -> Rule:
     action = payload["action"]
     return Rule(
         rule_id=str(payload["rule_id"]),
+        version=int(payload.get("version", 1)),
         cause=str(payload["cause"]),
         resolution_class=str(payload["resolution_class"]),
         plain_words=str(payload["plain_words"]),
@@ -117,6 +118,7 @@ def _rule_from_json(payload: dict[str, Any]) -> Rule:
         approved_by=str(payload.get("approved_by", "")),
         backtest_coverage=_backtest(payload).get("coverage"),
         backtest_precision=_decimal(_backtest(payload).get("precision")),
+        overrides_at_last_demotion=int(payload.get("overrides_at_last_demotion", 0)),
         observations=tuple(
             Observation(
                 batch=int(o["batch"]), case_id=str(o["case_id"]),

@@ -133,6 +133,13 @@ class Rule:
     source_operator: str = ""
     enabled: bool = True
 
+    #: Bumped by every edit that changes what this rule *does* -- a narrowed band, a
+    #: changed action. Not by a state move or a new observation: those are things that
+    #: happened to the rule, not changes to it. A provenance record names the version
+    #: that fired, so "which rule closed this row?" survives the rule being edited
+    #: afterwards, which is the whole reason an id alone is not enough.
+    version: int = 1
+
     #: Which rung of the specificity ladder this rule came off. See
     #: ``pipeline/rules/candidates.py``.
     level: str = "narrow"
@@ -154,6 +161,11 @@ class Rule:
     #: page can show what was known at approval time next to what has happened since.
     backtest_coverage: int | None = None
     backtest_precision: Decimal | None = None
+
+    #: The override tally at the moment of the last demotion. Overrides that already
+    #: cost a rule its active state are not charged to it twice -- without this, a
+    #: demoted rule would drop straight back out of active on its next promotion.
+    overrides_at_last_demotion: int = 0
 
     observations: tuple[Observation, ...] = field(default_factory=tuple)
     transitions: tuple[Transition, ...] = field(default_factory=tuple)
@@ -196,6 +208,26 @@ class Rule:
     def demonstration_support(self) -> int:
         """How many distinct operator resolutions stand behind this rule."""
         return len(self.demonstration_ids)
+
+    @property
+    def overrides(self) -> int:
+        """Times a human contradicted this rule while it was *acting*.
+
+        Only predictions made in ``active`` count. A shadow rule being wrong is the
+        system working -- that is what shadow is for -- and charging those to the
+        demotion tally would mean a rule could be demoted for mistakes it made before
+        it was ever allowed to do anything.
+        """
+        return sum(
+            1
+            for o in self.judged
+            if o.correct is False and o.state_at_prediction == RuleState.ACTIVE.value
+        )
+
+    @property
+    def overrides_since_demotion(self) -> int:
+        """Overrides not already paid for by an earlier demotion."""
+        return max(0, self.overrides - self.overrides_at_last_demotion)
 
     @property
     def fires(self) -> bool:
@@ -243,6 +275,13 @@ class Rule:
         )
         return replace(self, observations=updated)
 
+    def demoting(self, batch: int, reason: str) -> "Rule":
+        """Back to shadow, with the overrides that caused it marked as spent."""
+        return replace(
+            self.moving_to(RuleState.SHADOW, batch, reason),
+            overrides_at_last_demotion=self.overrides,
+        )
+
     def moving_to(self, state: RuleState, batch: int, reason: str) -> "Rule":
         return replace(
             self,
@@ -252,11 +291,16 @@ class Rule:
         )
 
     def narrowed(self, band: tuple[Decimal, Decimal], batch: int, note: str) -> "Rule":
-        """The corrigibility path: an operator tightening an over-matching band."""
+        """The corrigibility path: an operator tightening an over-matching band.
+
+        Bumps the version: this changes what the rule does, so a decision taken under
+        the old band must not read as though it were taken under this one.
+        """
         if band[0] < (self.variance_band_pct or band)[0] or band[1] > (self.variance_band_pct or band)[1]:
             raise ValueError("narrowing must not widen the band")
         return replace(
             self,
+            version=self.version + 1,
             variance_band_pct=band,
             transitions=self.transitions
             + (Transition(batch=batch, from_state=self.state.value, to_state=self.state.value,
@@ -266,6 +310,7 @@ class Rule:
     def to_json(self) -> dict[str, Any]:
         return {
             "rule_id": self.rule_id,
+            "version": self.version,
             "state": self.state.value,
             "enabled": self.enabled,
             "cause": self.cause,
@@ -303,6 +348,9 @@ class Rule:
                 ),
             },
             "support": self.support,
+            "overrides": self.overrides,
+            "overrides_since_demotion": self.overrides_since_demotion,
+            "overrides_at_last_demotion": self.overrides_at_last_demotion,
             "confirmations": self.confirmations,
             "refutations": self.refutations,
             "precision": None if self.precision is None else str(self.precision),

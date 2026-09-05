@@ -27,6 +27,7 @@ from pipeline.llm.schemas import MetricIntent
 from pipeline.metrics.corpus import Corpus
 from pipeline.metrics.pins import Pin
 from pipeline.metrics.registry import MetricParams, MetricResult, compute, get
+from pipeline.metrics.vocabulary import Refusal, check
 
 MAPPED = "mapped"
 CLARIFY = "clarify"
@@ -35,6 +36,14 @@ REFUSE = "refuse"
 
 class NotConfirmed(RuntimeError):
     """Tried to compute a plan nobody confirmed. Refused: confirm-before-compute is the point."""
+
+
+class Unsupported(RuntimeError):
+    """A slot names something the registry does not have. Names the term; offers no substitute."""
+
+    def __init__(self, refusal: Refusal) -> None:
+        super().__init__(refusal.message)
+        self.refusal = refusal
 
 
 @dataclass(frozen=True)
@@ -49,8 +58,27 @@ class Plan:
         return self.intent.outcome
 
     @property
+    def vocabulary_refusal(self) -> Refusal | None:
+        """The first slot this plan fills with a term the registry does not have.
+
+        Checked deterministically, by lookup, whatever the model said the outcome was.
+        The schema already stops the model naming an unregistered metric, but the
+        schema cannot stop a *grouping* a metric does not support, and it is not the
+        thing that should be trusted to notice either way.
+        """
+        if self.intent.outcome != MAPPED:
+            return None
+        return check(
+            self.intent.metric_id,
+            self.intent.group_by,
+            None if self.intent.channel is None else self.intent.channel.value,
+            (self.intent.from_batch, self.intent.to_batch),
+        )
+
+    @property
     def answerable(self) -> bool:
-        return self.intent.outcome == MAPPED
+        """Mapped by the model *and* every slot in vocabulary. Both, or it is refused."""
+        return self.intent.outcome == MAPPED and self.vocabulary_refusal is None
 
     @property
     def restatement(self) -> str:
@@ -67,13 +95,17 @@ class Plan:
         )
 
     def to_json(self) -> dict[str, Any]:
+        refusal = self.vocabulary_refusal
         return {
             "question": self.question,
             "outcome": self.outcome,
             "restatement": self.restatement,
             "metric_id": self.intent.metric_id,
             "clarifying_question": self.intent.clarifying_question,
-            "refusal": self.intent.refusal,
+            # The model's sentence where it wrote one; the lookup's where the model
+            # mapped a question it should not have. The lookup wins.
+            "refusal": refusal.message if refusal is not None else self.intent.refusal,
+            "unsupported_term": None if refusal is None else refusal.to_json(),
             "params": self.params.to_json() if self.answerable else None,
         }
 
@@ -89,6 +121,9 @@ def execute(plan: Plan, corpus: Corpus, *, confirmed: bool) -> MetricResult:
             f"{plan.question!r} was mapped but not confirmed; the restatement is shown "
             "and answered before anything is computed"
         )
+    refusal = plan.vocabulary_refusal
+    if refusal is not None:
+        raise Unsupported(refusal)
     if not plan.answerable:
         raise NotConfirmed(
             f"{plan.question!r} produced outcome {plan.outcome!r}, which is not a result"
@@ -104,6 +139,7 @@ def pin_from(plan: Plan, name: str, pin_id: str, pinned_by: str, pinned_at: date
         pin_id=pin_id,
         name=name,
         metric_id=str(plan.intent.metric_id),
+        metric_version=get(str(plan.intent.metric_id)).version,
         params=plan.params,
         pinned_by=pinned_by,
         pinned_at=pinned_at.isoformat(),

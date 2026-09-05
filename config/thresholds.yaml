@@ -90,9 +90,52 @@ rule_lifecycle:
   retirement_precision_floor: 0.75
   retirement_min_observations: 5
 
+  # Human overrides of an *active* rule before it is put back into shadow. This is a
+  # different signal from the retirement floor above, and both exist on purpose:
+  # retirement is slow statistical decay measured over `retirement_min_observations`,
+  # demotion is fast human disagreement and is recoverable. A rule an operator has
+  # corrected twice should stop acting this week, not once its precision has drifted
+  # far enough to average out.
+  #
+  # Demotion returns a rule to shadow, where it keeps predicting and can earn its way
+  # back through the ordinary promotion gate. The overrides that caused a demotion are
+  # not counted again afterwards, or a rule would fall out of active the moment it was
+  # promoted back.
+  max_overrides_before_demotion: 2
+
 claims:
-  deadline_days:
-    amazon: 30                       # SAFE-T window
-    flipkart: 30
-    myntra: 30
-    tcs_discrepancy: 10              # day-of-month cutoff, not a duration
+  # The deadline policy, as data. One row per scope; adding a channel means adding a
+  # row and never a code change. `rule` says what *kind* of clock it is, which is the
+  # part that used to be a conditional in pipeline/claims/deadlines.py:
+  #
+  #   days_from_event    -- `value` is a duration in days from the day the claim opened
+  #   day_of_next_month  -- `value` is a day *of the following month*, not a duration
+  #
+  # Most specific scope wins: a row naming a claim_type beats one naming only a
+  # channel, so a TCS discrepancy on Flipkart runs on the GSTR-8 calendar rather than
+  # borrowing Flipkart's 30-day commercial window. A scope with no row gets no clock
+  # at all rather than a default -- inventing a countdown no agreement backs is the
+  # one thing a claims queue cannot afford.
+  deadline_policy:
+    - channel: amazon
+      rule: days_from_event
+      value: 30
+      note: SAFE-T claim window
+    - channel: flipkart
+      rule: days_from_event
+      value: 30
+    - channel: myntra
+      rule: days_from_event
+      value: 30
+    - claim_type: tcs_timing_mismatch
+      rule: day_of_next_month
+      value: 10
+      note: GSTR-8 correction must be raised before the 10th of the following month
+
+  # Queue bucketing, in days remaining. Sized to the batch cadence rather than to
+  # calendar intuition: batches are weekly, so a three-day red bucket would never be
+  # observed -- a claim would pass from green to expired between two runs without ever
+  # being shown as urgent. Red is one batch left, amber is two.
+  buckets:
+    red_within_days: 7
+    amber_within_days: 14

@@ -22,12 +22,13 @@ have had their say. The order inside :meth:`ClaimRegister.advance` is the design
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
 
 from pipeline.cases import ExceptionCase
+from pipeline.claims.clock import BucketConfig, ClockTick, bucket_for
 from pipeline.claims.deadlines import DeadlineConfig, deadline_for
 from pipeline.claims.models import Claim, ClaimStatus, Evidence
 from pipeline.claims.recovery import RecoveryMatch, match_recoveries
@@ -51,6 +52,8 @@ class BatchClaims:
     expired: tuple[str, ...]
     filed: tuple[str, ...]
     drafted: tuple[str, ...] = ()
+    #: Open claims the clock put in an amber or red bucket this batch.
+    escalated: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -60,18 +63,28 @@ class BatchClaims:
             "expired": list(self.expired),
             "filed": list(self.filed),
             "drafted": list(self.drafted),
+            "escalated": list(self.escalated),
         }
 
 
 class ClaimRegister:
     """Every claim the corpus has produced, and the batch-by-batch record of them."""
 
-    def __init__(self, deadlines: DeadlineConfig, rounding_tolerance_inr: Decimal) -> None:
+    def __init__(
+        self,
+        deadlines: DeadlineConfig,
+        rounding_tolerance_inr: Decimal,
+        buckets: BucketConfig | None = None,
+    ) -> None:
         self.deadlines = deadlines
         self.rounding_tolerance_inr = rounding_tolerance_inr
+        self.buckets = buckets
         self._claims: dict[str, Claim] = {}
         self._by_order: dict[tuple[str, str], str] = {}
         self.batches: list[BatchClaims] = []
+        #: The last date the clock ran. Guards :meth:`tick` against re-running.
+        self._ticked_through: date | None = None
+        self.ticks: list[ClockTick] = []
 
     # -- access ------------------------------------------------------------ #
 
@@ -104,16 +117,29 @@ class ClaimRegister:
         resolutions: Iterable[Resolution] = (),
         drafter: Drafter | None = None,
     ) -> BatchClaims:
-        """Run one batch through the register. See the module docstring for the order."""
+        """Run one batch through the register. See the module docstring for the order.
+
+        Re-running a batch already recorded returns that batch's record untouched. A
+        register is fed by a scheduled job, and a job that opens a second claim for
+        the same shortfall on a retry turns an ordinary retry into a double count in
+        the queue total -- which is the one number the whole surface is arguing about.
+        """
+        already = next((r for r in self.batches if r.batch == batch), None)
+        if already is not None:
+            return already
+
         recovered = self._recover(batch, settlements)
-        expired = self._expire(batch, batch_end)
+        clock = self.tick(batch_end, batch)
         opened = self._open(batch, batch_end, routed, resolution_class_by_cause)
         drafted = self._draft(batch, opened, drafter)
         filed = self._file(batch, resolutions)
+        # Bucket what this batch opened, so a claim is never shown without one.
+        self._rebucket(batch_end)
 
         record = BatchClaims(
             batch=batch, opened=tuple(opened), recovered=tuple(recovered),
-            expired=tuple(expired), filed=tuple(filed), drafted=tuple(drafted),
+            expired=clock.expired, filed=tuple(filed), drafted=tuple(drafted),
+            escalated=clock.escalated,
         )
         self.batches.append(record)
         return record
@@ -136,6 +162,38 @@ class ClaimRegister:
                 )
             )
         return matches
+
+    def tick(self, as_of: date, batch: int) -> ClockTick:
+        """The daily clock: rebucket every open claim, expire the lapsed ones.
+
+        Idempotent on the date. A second call for the same day -- or for a day already
+        passed -- returns ``ran=False`` and changes nothing, so a scheduler that
+        retries cannot expire a claim twice or move a bucket underneath somebody
+        reading it.
+        """
+        if self._ticked_through is not None and as_of <= self._ticked_through:
+            return ClockTick(as_of=as_of, ran=False)
+
+        expired = self._expire(batch, as_of)
+        buckets = self._rebucket(as_of)
+        self._ticked_through = as_of
+        record = ClockTick(
+            as_of=as_of, ran=True, expired=tuple(expired), buckets=tuple(buckets)
+        )
+        self.ticks.append(record)
+        return record
+
+    def _rebucket(self, as_of: date) -> list[tuple[str, str]]:
+        """Stamp every open claim with the bucket its remaining days put it in."""
+        if self.buckets is None:
+            return []
+        stamped: list[tuple[str, str]] = []
+        for claim in self.open_claims:
+            bucket = bucket_for(claim.days_remaining(as_of), self.buckets)
+            if claim.bucket != bucket:
+                self._replace(replace(claim, bucket=bucket))
+            stamped.append((claim.claim_id, bucket))
+        return stamped
 
     def _expire(self, batch: int, batch_end: date) -> list[str]:
         """Retire the claims whose window closed. Kept, not deleted -- see the harness."""

@@ -12,6 +12,7 @@ read from config here rather than restated.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -154,6 +155,87 @@ def test_promotion_records_the_numbers_that_justified_it() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# active -> shadow: demotion on human override
+# --------------------------------------------------------------------------- #
+
+
+def overridden(rule_: Rule, times: int) -> Rule:
+    """``times`` human corrections of this rule while it was acting."""
+    for index in range(times):
+        case_id = f"case-09-ord_over{index}"
+        rule_ = rule_.observing(
+            Observation(batch=9, case_id=case_id, predicted_cause=rule_.cause,
+                        state_at_prediction=RuleState.ACTIVE.value)
+        ).judging(case_id, False, "human_resolution")
+    return rule_
+
+
+def test_an_active_rule_at_the_override_count_is_demoted_to_shadow() -> None:
+    """The acceptance check. Fast human disagreement, not slow statistical decay."""
+    corrected = overridden(rule(RuleState.ACTIVE), CFG.max_overrides_before_demotion)
+    moved = advance(corrected, batch=9, cfg=CFG)
+    assert moved.state is RuleState.SHADOW
+    assert "human overrides while active" in moved.transitions[-1].reason
+
+
+def test_one_override_short_of_the_count_keeps_acting() -> None:
+    nearly = overridden(rule(RuleState.ACTIVE), CFG.max_overrides_before_demotion - 1)
+    assert advance(nearly, batch=9, cfg=CFG).state is RuleState.ACTIVE
+
+
+def test_demotion_needs_no_redeploy_only_a_different_number() -> None:
+    """The acceptance check says "without a redeploy". The threshold is config, and
+    the same rule object demotes or does not purely on what the config says."""
+    corrected = overridden(rule(RuleState.ACTIVE), 2)
+    strict = replace(CFG, max_overrides_before_demotion=2)
+    lenient = replace(CFG, max_overrides_before_demotion=5)
+    assert advance(corrected, batch=9, cfg=strict).state is RuleState.SHADOW
+    assert advance(corrected, batch=9, cfg=lenient).state is RuleState.ACTIVE
+
+
+def test_being_wrong_in_shadow_is_not_an_override() -> None:
+    """Shadow is where a rule is allowed to be wrong. Charging those to the demotion
+    tally would demote a rule for mistakes made before it could do anything."""
+    in_shadow = judged(rule(RuleState.SHADOW), correct=0, wrong=4)
+    assert in_shadow.overrides == 0
+    assert in_shadow.overrides_since_demotion == 0
+
+
+def test_the_overrides_that_caused_a_demotion_are_not_charged_twice() -> None:
+    """Otherwise a demoted rule falls straight back out of active on re-promotion."""
+    corrected = overridden(rule(RuleState.ACTIVE), CFG.max_overrides_before_demotion)
+    demoted = advance(corrected, batch=9, cfg=CFG)
+    assert demoted.overrides_since_demotion == 0
+
+    back = replace(demoted, state=RuleState.ACTIVE)
+    assert advance(back, batch=10, cfg=CFG).state is RuleState.ACTIVE
+
+
+def test_a_demoted_rule_can_earn_its_way_back_through_the_ordinary_gate() -> None:
+    """Demotion is recoverable. That is the difference from retirement."""
+    corrected = overridden(rule(RuleState.ACTIVE), CFG.max_overrides_before_demotion)
+    demoted = advance(corrected, batch=9, cfg=CFG)
+    assert demoted.state is RuleState.SHADOW
+
+    redeemed = judged(demoted, correct=40, wrong=0)
+    assert advance(redeemed, batch=12, cfg=CFG).state is RuleState.ACTIVE
+
+
+def test_retirement_beats_demotion_when_a_rule_qualifies_for_both() -> None:
+    """Terminal decay outranks a recoverable correction. Most severe wins."""
+    both = overridden(judged(rule(RuleState.ACTIVE), correct=0, wrong=5), 2)
+    assert advance(both, batch=9, cfg=CFG).state is RuleState.RETIRED
+
+
+def test_demotion_and_retirement_are_both_available_and_are_different() -> None:
+    """Both transitions exist; they are not two names for one mechanism."""
+    demoted = advance(overridden(rule(RuleState.ACTIVE), 2), batch=9, cfg=CFG)
+    retired = advance(judged(rule(RuleState.ACTIVE), correct=1, wrong=4), batch=9, cfg=CFG)
+    assert demoted.state is RuleState.SHADOW
+    assert retired.state is RuleState.RETIRED
+
+
+# --------------------------------------------------------------------------- #
 # -> retired
 # --------------------------------------------------------------------------- #
 
@@ -169,9 +251,17 @@ def test_a_rule_retires_itself_once_it_has_been_wrong_enough_times() -> None:
 
 
 def test_a_bad_run_that_is_too_short_to_judge_does_not_retire_a_rule() -> None:
-    """One unlucky batch is not evidence either. The floor needs observations."""
+    """One unlucky batch is not evidence enough to *retire*. The floor needs observations.
+
+    It is enough to demote, and that is the two signals doing different jobs: the rule
+    stops acting immediately because humans keep correcting it, but it is not written
+    off on a sample too small to mean anything. It goes back to shadow, where it keeps
+    predicting and can earn its way out.
+    """
     unlucky = judged(rule(RuleState.ACTIVE), correct=0, wrong=CFG.retirement_min_observations - 1)
-    assert advance(unlucky, batch=5, cfg=CFG).state is RuleState.ACTIVE
+    moved = advance(unlucky, batch=5, cfg=CFG)
+    assert moved.state is not RuleState.RETIRED
+    assert moved.state is RuleState.SHADOW
 
 
 def test_retirement_is_checked_before_promotion() -> None:

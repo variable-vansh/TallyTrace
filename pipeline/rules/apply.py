@@ -47,6 +47,9 @@ class Provenance:
     batch: int
     outcome: str
     rule_id: str | None
+    #: The version of the rule that fired. An id alone cannot answer "what did this
+    #: rule say when it closed that row?" once the rule has been edited since.
+    rule_version: int | None
     rule_state_at_fire: str | None
     source_resolution_id: str | None
     source_operator: str | None
@@ -61,6 +64,7 @@ class Provenance:
             "batch": self.batch,
             "outcome": self.outcome,
             "rule_id": self.rule_id,
+            "rule_version": self.rule_version,
             "rule_state_at_fire": self.rule_state_at_fire,
             "source_resolution_id": self.source_resolution_id,
             "source_operator": self.source_operator,
@@ -105,6 +109,7 @@ def _provenance(
         batch=case.batch,
         outcome=outcome,
         rule_id=None if rule is None else rule.rule_id,
+        rule_version=None if rule is None else rule.version,
         rule_state_at_fire=None if rule is None else rule.state.value,
         source_resolution_id=None if rule is None else rule.source_resolution_id,
         source_operator=None if rule is None else rule.source_operator,
