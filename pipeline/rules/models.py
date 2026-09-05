@@ -133,6 +133,28 @@ class Rule:
     source_operator: str = ""
     enabled: bool = True
 
+    #: Which rung of the specificity ladder this rule came off. See
+    #: ``pipeline/rules/candidates.py``.
+    level: str = "narrow"
+
+    #: Every operator resolution this rule stands on, oldest first. **Distinct
+    #: demonstrations, not rows.** Eighty rows cleared by one sentence is one
+    #: demonstration, and the difference is the whole point of the gate: a rule with
+    #: one of these explains the row it came from and has said nothing about the
+    #: world yet. ``source_resolution_id`` is the first of them, kept as its own
+    #: field because every provenance chain in the system already points at it.
+    demonstration_ids: tuple[str, ...] = ()
+
+    #: Set by a human on the candidate card. A rule nobody approved never predicts,
+    #: whatever its backtest said -- see ``pipeline/rules/lifecycle.py``.
+    approved: bool = False
+    approved_by: str = ""
+
+    #: How the candidate scored on the history that admitted it. Kept so the rules
+    #: page can show what was known at approval time next to what has happened since.
+    backtest_coverage: int | None = None
+    backtest_precision: Decimal | None = None
+
     observations: tuple[Observation, ...] = field(default_factory=tuple)
     transitions: tuple[Transition, ...] = field(default_factory=tuple)
     last_fired_batch: int | None = None
@@ -161,8 +183,19 @@ class Rule:
 
     @property
     def support(self) -> int:
-        """How many predictions this rule has made, judged or not."""
+        """How many predictions this rule has made, judged or not.
+
+        Deliberately *not* the number the promotion gate reads. This counts rows the
+        rule spoke about; :attr:`demonstration_support` counts the times a human
+        independently demonstrated the phenomenon. A rule can have eighty of these
+        and one of those.
+        """
         return len(self.observations)
+
+    @property
+    def demonstration_support(self) -> int:
+        """How many distinct operator resolutions stand behind this rule."""
+        return len(self.demonstration_ids)
 
     @property
     def fires(self) -> bool:
@@ -172,6 +205,33 @@ class Rule:
 
     def observing(self, observation: Observation) -> "Rule":
         return replace(self, observations=self.observations + (observation,))
+
+    def demonstrated_by(self, resolution_id: str) -> "Rule":
+        """Record another human demonstration of the same phenomenon.
+
+        Idempotent by resolution id: the same note counted twice would let one
+        sentence walk a rule through a gate that exists to require several.
+        """
+        if resolution_id in self.demonstration_ids:
+            return self
+        return replace(self, demonstration_ids=self.demonstration_ids + (resolution_id,))
+
+    def approving(self, operator: str, batch: int, note: str = "") -> "Rule":
+        """A human accepted the candidate card. Recorded; it does not move the state.
+
+        Approval and promotion are separate on purpose. This says the rule is worth
+        watching; ``lifecycle.advance`` is what decides it may start watching, and the
+        thresholds it reads are nobody's opinion.
+        """
+        detail = f"{operator} approved the candidate card" + (f": {note}" if note else "")
+        return replace(
+            self,
+            approved=True,
+            approved_by=operator,
+            transitions=self.transitions
+            + (Transition(batch=batch, from_state=self.state.value,
+                          to_state=self.state.value, reason=detail),),
+        )
 
     def judging(self, case_id: str, correct: bool, source: str) -> "Rule":
         """Record the verdict on a prediction. Only the first verdict counts."""
@@ -231,6 +291,17 @@ class Rule:
             "created_batch": self.created_batch,
             "source_resolution_id": self.source_resolution_id,
             "source_operator": self.source_operator,
+            "level": self.level,
+            "demonstration_ids": list(self.demonstration_ids),
+            "demonstration_support": self.demonstration_support,
+            "approved": self.approved,
+            "approved_by": self.approved_by,
+            "backtest": {
+                "coverage": self.backtest_coverage,
+                "precision": (
+                    None if self.backtest_precision is None else str(self.backtest_precision)
+                ),
+            },
             "support": self.support,
             "confirmations": self.confirmations,
             "refutations": self.refutations,
@@ -248,6 +319,7 @@ def rule_from(
     batch: int,
     resolution_id: str,
     operator: str,
+    level: str = "narrow",
 ) -> Rule:
     """Build a stored rule from the model's structured output, refusing memorised ones."""
     action: RuleAction = induced.action
@@ -277,4 +349,6 @@ def rule_from(
         created_batch=batch,
         source_resolution_id=resolution_id,
         source_operator=operator,
+        level=level,
+        demonstration_ids=(resolution_id,) if resolution_id else (),
     )

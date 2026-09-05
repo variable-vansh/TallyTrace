@@ -1,0 +1,464 @@
+{
+  "approvals": [
+    {
+      "cause": "commission_rate_stale",
+      "channel": "myntra",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "This is the outerwear slab change. Exactly what I meant."
+    },
+    {
+      "cause": "commission_rate_stale",
+      "channel": "myntra",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "paid_against_fully_reversed_order",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "paid_against_fully_reversed_order",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "weight_dispute_hold",
+      "channel": "flipkart",
+      "reason_code": "payment_withheld_on_hold",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "weight_dispute_hold",
+      "channel": "flipkart",
+      "reason_code": "payment_withheld_on_hold",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "weight_dispute_hold",
+      "channel": "flipkart",
+      "reason_code": "payment_withheld_on_hold",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-15",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "fee_mismatch_other",
+      "channel": "website",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "fee_mismatch_other",
+      "channel": "website",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": null,
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "Only right about half the time on the backtest. Watch it anyway - it costs nothing in shadow and I want to see which ones it gets wrong before I decide whether the pattern is real or I wrote the note badly."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "flipkart",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": null,
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "flipkart",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "flipkart",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "fee_mismatch_other",
+      "channel": "website",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": null,
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-22",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "commission_rate_stale",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "commission_rate_stale",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "commission_slab_change",
+      "channel": "flipkart",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "commission_slab_change",
+      "channel": "flipkart",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-06-29",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": "flipkart",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": "flipkart",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "rto_reversal_later_cycle",
+      "channel": "flipkart",
+      "reason_code": "late_row_for_already_settled_order",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "settlement_lag_crossing_batch",
+      "channel": "amazon",
+      "reason_code": "settlement_outside_date_window",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "settlement_lag_crossing_batch",
+      "channel": "amazon",
+      "reason_code": "settlement_outside_date_window",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "duplicate_settlement_row",
+      "channel": null,
+      "reason_code": "bank_group_sum_mismatch",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "bank_credit_unmatched",
+      "channel": null,
+      "reason_code": "bank_credit_without_settlement_group",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "duplicate_settlement_row",
+      "channel": null,
+      "reason_code": "bank_group_sum_mismatch",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "bank_credit_unmatched",
+      "channel": null,
+      "reason_code": "bank_credit_without_settlement_group",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-06",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "myntra",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-13",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "myntra",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-13",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "missing_settlement_row",
+      "channel": "myntra",
+      "reason_code": "settlement_overdue_beyond_window",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-13",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "missing_settlement_row",
+      "channel": "amazon",
+      "reason_code": "settlement_overdue_beyond_window",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-13",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "short_payment_unexplained",
+      "channel": "myntra",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-13",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "promo_cofunding_deduction",
+      "channel": "myntra",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-27",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "promo_cofunding_deduction",
+      "channel": "myntra",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-07-27",
+      "note": "Without the band this fires on twenty-nine rows and agrees with me on three of them. It has stopped being about promo co-funding and started being about any Myntra fee variance. No."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-03",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "refund_timing_lag",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-03",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "promo_cofunding_deduction",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-10",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "chargeback_deduction",
+      "channel": "website",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "narrow",
+      "decision": "approve",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-10",
+      "note": "The narrowest reading of what I wrote. Watch it and show me how it does."
+    },
+    {
+      "cause": "chargeback_deduction",
+      "channel": "website",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "medium",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-10",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "chargeback_deduction",
+      "channel": "website",
+      "reason_code": "net_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-10",
+      "note": "A looser version of a rule I have already approved. One rule per phenomenon."
+    },
+    {
+      "cause": "promo_cofunding_deduction",
+      "channel": "amazon",
+      "reason_code": "fee_variance_outside_tolerance",
+      "level": "general",
+      "decision": "reject",
+      "operator": "priya.n@demostore.in",
+      "decided_at": "2025-08-10",
+      "note": "Same as the Myntra one - drop the band and it is just 'Amazon charged a fee'."
+    }
+  ]
+}

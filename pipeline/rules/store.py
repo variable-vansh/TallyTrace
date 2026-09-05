@@ -78,6 +78,16 @@ def _days(raw: Any) -> tuple[int, int] | None:
     return None if raw is None else (int(raw[0]), int(raw[1]))
 
 
+def _decimal(raw: Any) -> Decimal | None:
+    return None if raw is None else Decimal(str(raw))
+
+
+def _backtest(payload: dict[str, Any]) -> dict[str, Any]:
+    """The backtest block, absent on rules written before the evidence gate existed."""
+    block = payload.get("backtest") or {}
+    return block if isinstance(block, dict) else {}
+
+
 def _rule_from_json(payload: dict[str, Any]) -> Rule:
     conditions = payload["conditions"]
     action = payload["action"]
@@ -101,6 +111,12 @@ def _rule_from_json(payload: dict[str, Any]) -> Rule:
         source_resolution_id=str(payload["source_resolution_id"]),
         source_operator=str(payload["source_operator"]),
         enabled=bool(payload["enabled"]),
+        level=str(payload.get("level", "narrow")),
+        demonstration_ids=tuple(str(rid) for rid in payload.get("demonstration_ids", ())),
+        approved=bool(payload.get("approved", False)),
+        approved_by=str(payload.get("approved_by", "")),
+        backtest_coverage=_backtest(payload).get("coverage"),
+        backtest_precision=_decimal(_backtest(payload).get("precision")),
         observations=tuple(
             Observation(
                 batch=int(o["batch"]), case_id=str(o["case_id"]),

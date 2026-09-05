@@ -11,18 +11,18 @@ TALLYTRACE — SCORE REPORT
 THROUGHPUT
 ------------------------------------------------------------------------------
 batch   records   settle   seconds     rec/s    tokens     ₹/txn
-    1       244       59     0.018     13450     17127      0.16
-    2       184       75     0.019      9815     20939      0.16
-    3       195       87     0.024      8096     27078      0.18
-    4       225      102     0.026      8584     34007      0.21
-    5       240      114     0.032      7525     39869      0.22
-    6       269      128     0.026     10548     35580      0.16
-    7       301      141     0.029     10209     40671      0.18
-    8       283      155     0.033      8520     46199      0.19
-    9       245      168     0.035      6960     51980      0.20
-   10       223      181     0.039      5735     66345      0.24
+    1       244       59     0.021     11609     17127      0.16
+    2       184       75     0.020      9186     20939      0.16
+    3       195       87     0.027      7196     27078      0.18
+    4       225      102     0.030      7386     34007      0.21
+    5       240      114     0.038      6373     39869      0.22
+    6       269      128     0.031      8779     35580      0.16
+    7       301      141     0.037      8120     40671      0.18
+    8       283      155     0.039      7280     46199      0.19
+    9       245      168     0.042      5836     51980      0.20
+   10       223      181     0.044      5037     66345      0.24
 ------------------------------------------------------------------------------
-  all      2409     1210     0.281      8561    379795
+  all      2409     1210     0.329      7319    379795
        model claude-opus-5, rates from config/pricing.yaml.
        TOKEN COUNTS ARE ESTIMATED. Some cached answers were recorded from a
        transcript rather than metered by the API, so their token counts are
@@ -122,15 +122,15 @@ AUTO-RESOLUTION POLICY — THE CEILINGS A RULE CANNOT OUT-CONFIDENCE
 LEARNING LOOP — WHAT A RULE CLOSED, AND WHETHER IT WAS RIGHT
 ------------------------------------------------------------------------------
 batch  queue  auto  held   esc  precision  ₹ auto-resolved    ₹ escalated  learn  prom  ret  cards  touch  touch %
-    1     13     0     0    13          —            ₹0.00      ₹33776.99      6     0    0      0     13   22.03%
-    2     17     0     0    17          —            ₹0.00      ₹11893.62      4     2    0      2     17   22.67%
-    3     22     6     4    16    100.00%          ₹585.10      ₹17674.33      5     0    1      3     14   16.09%
-    4     35     7     4    28    100.00%          ₹663.96      ₹65010.84      5     0    0      7     26   25.49%
-    5     41     9     5    32     88.89%          ₹821.59      ₹41170.78      3     3    0      7     29   25.44%
-    6     41    19     9    22    100.00%          ₹977.28      ₹43724.91      2     1    0      7     18   14.06%
-    7     46    21    16    25    100.00%         ₹1146.23      ₹43374.46      3     1    0      7     15   10.64%
-    8     51    24    19    27     95.83%         ₹1388.81      ₹42916.64      0     2    0     10     15    9.68%
-    9     60    25    26    35    100.00%         ₹1280.55      ₹70234.52      3     0    0      8     16    9.52%
+    1     13     0     0    13          —            ₹0.00      ₹33776.99      7     0    0      0     13   22.03%
+    2     17     0     0    17          —            ₹0.00      ₹11893.62      9     2    0      2     17   22.67%
+    3     22     6     4    16    100.00%          ₹585.10      ₹17674.33      7     0    1      3     14   16.09%
+    4     35     7     4    28    100.00%          ₹663.96      ₹65010.84      9     0    0      5     26   25.49%
+    5     41     9     5    32     88.89%          ₹821.59      ₹41170.78      5     3    0      7     29   25.44%
+    6     41    19     9    22    100.00%          ₹977.28      ₹43724.91      0     1    0      7     18   14.06%
+    7     46    21    16    25    100.00%         ₹1146.23      ₹43374.46      2     1    0      7     15   10.64%
+    8     51    24    19    27     95.83%         ₹1388.81      ₹42916.64      2     2    0      9     15    9.68%
+    9     60    25    26    35    100.00%         ₹1280.55      ₹70234.52      5     0    0      8     16    9.52%
    10     74    35    33    39    100.00%         ₹1339.90     ₹120624.39      0     0    0      8     11    6.08%
 ------------------------------------------------------------------------------
        overall auto-resolution precision 98.63% over 146 scored resolutions.
@@ -157,40 +157,55 @@ promo_cofunding_deduction         batch 7           3          0          0     
 RULES — EVERY ONE, INCLUDING THE RETIRED ONE
 ------------------------------------------------------------------------------
 id    state      born  support    +   -  live prec     true prec  last fired  cause
-R-01  shadow        1        2    2   0    100.00%             —           —  duplicate_settlement_row
-R-02  shadow        1        2    2   0    100.00%             —           —  bank_credit_unmatched
-R-03  active        1        6    4   0    100.00%             —           —  weight_dispute_hold
-R-04  shadow        1        0    0   0          —             —           —  duplicate_settlement_row
-R-05  active        1       84   26   0    100.00%   97.44% (78)    batch 10  commission_rate_stale
-R-06  active        1       40   19   0    100.00%             —           —  refund_timing_lag
-R-07  retired       2        5    2   3     40.00%             —           —  rto_reversal_later_cycle
+R-01  active        1       84   26   0    100.00%   97.44% (78)    batch 10  commission_rate_stale
+R-02  proposed      1        0    0   0          —             —           —  commission_rate_stale
+R-03  active        1       40   19   0    100.00%             —           —  refund_timing_lag
+R-04  proposed      1        0    0   0          —             —           —  refund_timing_lag
+R-05  active        1        6    4   0    100.00%             —           —  weight_dispute_hold
+R-06  proposed      1        0    0   0          —             —           —  weight_dispute_hold
+R-07  proposed      1        0    0   0          —             —           —  weight_dispute_hold
 R-08  shadow        2        0    0   0          —             —           —  fee_mismatch_other
-R-09  shadow        2        0    0   0          —             —           —  short_payment_unexplained
-R-10  shadow        2        0    0   0          —             —           —  fee_mismatch_other
-R-11  active        3       40   16   0    100.00%             —           —  refund_timing_lag
-R-12  shadow        3        0    0   0          —             —           —  tcs_timing_mismatch
-R-13  active        3       37   14   0    100.00%  100.00% (29)    batch 10  commission_rate_stale
-R-14  shadow        3        1    1   0    100.00%             —           —  commission_slab_change
-R-15  shadow        3        0    0   0          —             —           —  rounding_variance
-R-16  active        4       44   19   0    100.00%  100.00% (39)    batch 10  settlement_lag_crossing_batch
-R-17  active        4       44   16   0    100.00%             —           —  rto_reversal_later_cycle
-R-18  shadow        4        1    1   0    100.00%             —           —  refund_timing_lag
-R-19  shadow        4        0    0   0          —             —           —  short_payment_unexplained
-R-20  shadow        4        0    0   0          —             —           —  tds_timing_mismatch
-R-21  active        5       20    8   0    100.00%             —           —  missing_settlement_row
-R-22  shadow        5        0    0   0          —             —           —  missing_settlement_row
-R-23  shadow        5        0    0   0          —             —           —  short_payment_unexplained
-R-24  shadow        6        0    0   0          —             —           —  refund_timing_lag
-R-25  shadow        6        0    0   0          —             —           —  fee_mismatch_other
-R-26  shadow        7        0    0   0          —             —           —  tcs_timing_mismatch
-R-27  active        7        3    3   0    100.00%             —           —  promo_cofunding_deduction
-R-28  shadow        7        0    0   0          —             —           —  fee_mismatch_other
-R-29  shadow        9        0    0   0          —             —           —  missing_settlement_row
-R-30  shadow        9        3    2   0    100.00%             —           —  chargeback_deduction
-R-31  shadow        9        2    2   0    100.00%             —           —  promo_cofunding_deduction
+R-09  proposed      2        0    0   0          —             —           —  fee_mismatch_other
+R-10  retired       2        5    2   3     40.00%             —           —  rto_reversal_later_cycle
+R-11  shadow        2        0    0   0          —             —           —  short_payment_unexplained
+R-12  proposed      2        0    0   0          —             —           —  rto_reversal_later_cycle
+R-13  proposed      2        0    0   0          —             —           —  short_payment_unexplained
+R-14  proposed      2        0    0   0          —             —           —  short_payment_unexplained
+R-15  proposed      2        0    0   0          —             —           —  fee_mismatch_other
+R-16  proposed      2        0    0   0          —             —           —  rto_reversal_later_cycle
+R-17  active        3       40   16   0    100.00%             —           —  refund_timing_lag
+R-18  proposed      3        0    0   0          —             —           —  refund_timing_lag
+R-19  active        3       37   14   0    100.00%  100.00% (29)    batch 10  commission_rate_stale
+R-20  proposed      3        0    0   0          —             —           —  commission_rate_stale
+R-21  proposed      3        0    0   0          —             —           —  refund_timing_lag
+R-22  shadow        3        1    1   0    100.00%             —           —  commission_slab_change
+R-23  proposed      3        0    0   0          —             —           —  commission_slab_change
+R-24  active        4       44   16   0    100.00%             —           —  rto_reversal_later_cycle
+R-25  proposed      4        0    0   0          —             —           —  rto_reversal_later_cycle
+R-26  proposed      4        0    0   0          —             —           —  rto_reversal_later_cycle
+R-27  active        4       44   19   0    100.00%  100.00% (39)    batch 10  settlement_lag_crossing_batch
+R-28  proposed      4        0    0   0          —             —           —  settlement_lag_crossing_batch
+R-29  shadow        4        1    1   0    100.00%             —           —  duplicate_settlement_row
+R-30  shadow        4        1    1   0    100.00%             —           —  bank_credit_unmatched
+R-31  proposed      4        0    0   0          —             —           —  duplicate_settlement_row
+R-32  proposed      4        0    0   0          —             —           —  bank_credit_unmatched
+R-33  shadow        5        0    0   0          —             —           —  short_payment_unexplained
+R-34  proposed      5        0    0   0          —             —           —  short_payment_unexplained
+R-35  shadow        5        0    0   0          —             —           —  missing_settlement_row
+R-36  active        5       20    8   0    100.00%             —           —  missing_settlement_row
+R-37  proposed      5        0    0   0          —             —           —  short_payment_unexplained
+R-38  active        7        3    3   0    100.00%             —           —  promo_cofunding_deduction
+R-39  proposed      7        0    0   0          —             —           —  promo_cofunding_deduction
+R-40  shadow        8        0    0   0          —             —           —  refund_timing_lag
+R-41  proposed      8        0    0   0          —             —           —  refund_timing_lag
+R-42  shadow        9        2    2   0    100.00%             —           —  promo_cofunding_deduction
+R-43  shadow        9        3    2   0    100.00%             —           —  chargeback_deduction
+R-44  proposed      9        0    0   0          —             —           —  chargeback_deduction
+R-45  proposed      9        0    0   0          —             —           —  chargeback_deduction
+R-46  proposed      9        0    0   0          —             —           —  promo_cofunding_deduction
 ------------------------------------------------------------------------------
        Retired, and why — this is evidence the lifecycle works, not a defect:
-       R-07  A deduction arriving within three weeks of an order settling is the return coming back through, and nets off against the original sale.
+       R-10  A deduction arriving within three weeks of an order settling is the return coming back through, and nets off against the original sale.
               retired in batch 3: live precision 40.00% over 5 judged observations is below the 75% floor
        'live prec' is what the operator's own resolutions said. 'true prec' is what
        the answer key says about the rows the rule closed unattended. Where they

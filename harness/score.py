@@ -58,7 +58,9 @@ from pipeline.llm.client import client_from
 from pipeline.loader import load_batch
 from pipeline.matcher import BatchResult, match_config_from
 from pipeline.metrics.registry import REGISTRY
+from pipeline.rules import approvals as approval_log
 from pipeline.rules import resolutions as operator_log
+from pipeline.rules.backtest import Demonstration
 from pipeline.rules import store as rule_store
 from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
 from pipeline.rules.models import RuleState
@@ -137,6 +139,12 @@ def _reconcile_all(
     book = OpenBook.empty()
     finding_log = FindingLog()
     log = operator_log.load()
+    # Carried across batches exactly as ``pipeline.learn.run`` carries them. A
+    # candidate is backtested against every resolution the operator has ever written,
+    # so a per-batch history would score each candidate against one week and quietly
+    # measure something else than the product does.
+    approvals = approval_log.load()
+    history: list[Demonstration] = []
 
     pricing_cfg = load_yaml(CONFIG_DIR / "pricing.yaml")
     client = client_from(
@@ -152,7 +160,7 @@ def _reconcile_all(
         started = time.perf_counter()
         learned = run_learning_batch(
             tables, book, cfg, record.store, client, log, finding_log, record.register,
-            guardrails=guardrails,
+            guardrails=guardrails, history=history, approvals=approvals,
         )
         timings.append((tables.rows_read, time.perf_counter() - started))
         record.batches.append(learned)

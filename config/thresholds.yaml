@@ -59,6 +59,32 @@ auto_resolution:
     - chargeback_deduction
 
 rule_lifecycle:
+  # Distinct operator demonstrations a candidate needs before it may enter shadow and
+  # start predicting. Demonstrations, not rows: eighty rows cleared by one sentence is
+  # one piece of evidence, and counting them as eighty is how a rule induced from a
+  # single anecdote walks straight into the lifecycle wearing a perfect backtest.
+  #
+  # Set to 2 after running the corpus at 1, 2 and 3. The comparison is in RESULTS.md
+  # and it is not the one that was expected: auto-resolution precision (98.63%), the
+  # review-rate curve (100% -> 14.9%) and the number of cases closed (146) are
+  # *identical* at all three. The gate does not move the outcome, because what a rule
+  # is allowed to do is decided by the approval, the lifecycle and the guardrails
+  # underneath it. What the gate moves is how much unsupported material reaches a
+  # human: at 1 the operator is shown 77 candidates, at 2 they are shown 46, at 3
+  # they are shown 34.
+  #
+  # 3 was the intended setting and was rejected on evidence. It delays the loose
+  # rto_reversal rule into shadow at batch 3, after which ten batches are not long
+  # enough for it to reach `retirement_min_observations` -- so nothing retires, and
+  # "at least one rule retired itself" is a checkpoint-3 done condition and the
+  # clearest evidence the lifecycle is real. Buying a shorter review queue by
+  # deleting the demotion story is a bad trade.
+  #
+  # Lowering it to 1 does not loosen the gate, it removes it: a rule with one
+  # demonstration backtests at 100% precision on the row it was induced from, by
+  # construction, and 1 is the value at which zero candidates are ever discarded.
+  min_support_demonstrations: 2
+
   promotion_min_confirmations: 3
   promotion_min_precision: 0.90
   retirement_precision_floor: 0.75

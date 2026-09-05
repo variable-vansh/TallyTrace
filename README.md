@@ -23,7 +23,7 @@ every run.
 | Auto-match rate | **69.17%** of settlement rows, matched on exact keys and explicit tolerances |
 | Human decisions per batch | **22.03% → 6.08%** of the batch, plateauing above zero |
 | Auto-resolution precision | **98.63%** over 146 scored resolutions |
-| Rules learned / active / retired | 31 / 9 / **1** |
+| Rules learned / active / retired | 46 / 9 / **1** |
 | Correct abstention on held-out causes | **100%**, both, on first sight and ever |
 | Claims opened / recovered / expired | 57 / **26** (₹48,441.58) / 11 (₹17,516.77) |
 | Claims still open | 20, ₹35,252.95, **3 expiring within 9 days** |
@@ -428,15 +428,15 @@ about: distinct decisions a human has to make, as a share of the batch. It falls
 LEARNING LOOP — WHAT A RULE CLOSED, AND WHETHER IT WAS RIGHT
 ------------------------------------------------------------------------------
 batch  queue  auto  held   esc  precision  ₹ auto-resolved    ₹ escalated  learn  prom  ret  cards  touch  touch %
-    1     13     0     0    13          —            ₹0.00      ₹33776.99      6     0    0      0     13   22.03%
-    2     17     0     0    17          —            ₹0.00      ₹11893.62      4     2    0      2     17   22.67%
-    3     22     6     4    16    100.00%          ₹585.10      ₹17674.33      5     0    1      3     14   16.09%
-    4     35     7     4    28    100.00%          ₹663.96      ₹65010.84      5     0    0      7     26   25.49%
-    5     41     9     5    32     88.89%          ₹821.59      ₹41170.78      3     3    0      7     29   25.44%
-    6     41    19     9    22    100.00%          ₹977.28      ₹43724.91      2     1    0      7     18   14.06%
-    7     46    21    16    25    100.00%         ₹1146.23      ₹43374.46      3     1    0      7     15   10.64%
-    8     51    24    19    27     95.83%         ₹1388.81      ₹42916.64      0     2    0     10     15    9.68%
-    9     60    25    26    35    100.00%         ₹1280.55      ₹70234.52      3     0    0      8     16    9.52%
+    1     13     0     0    13          —            ₹0.00      ₹33776.99      7     0    0      0     13   22.03%
+    2     17     0     0    17          —            ₹0.00      ₹11893.62      9     2    0      2     17   22.67%
+    3     22     6     4    16    100.00%          ₹585.10      ₹17674.33      7     0    1      3     14   16.09%
+    4     35     7     4    28    100.00%          ₹663.96      ₹65010.84      9     0    0      5     26   25.49%
+    5     41     9     5    32     88.89%          ₹821.59      ₹41170.78      5     3    0      7     29   25.44%
+    6     41    19     9    22    100.00%          ₹977.28      ₹43724.91      0     1    0      7     18   14.06%
+    7     46    21    16    25    100.00%         ₹1146.23      ₹43374.46      2     1    0      7     15   10.64%
+    8     51    24    19    27     95.83%         ₹1388.81      ₹42916.64      2     2    0      9     15    9.68%
+    9     60    25    26    35    100.00%         ₹1280.55      ₹70234.52      5     0    0      8     16    9.52%
    10     74    35    33    39    100.00%         ₹1339.90     ₹120624.39      0     0    0      8     11    6.08%
 ------------------------------------------------------------------------------
        overall auto-resolution precision 98.63% over 146 scored resolutions.
@@ -508,7 +508,7 @@ pipeline/   models.py, config.py, loader.py, run.py, cases.py, learn.py
 harness/    scoring: reads data/truth, which the pipeline never does
 tools/      fixture and artifact builders, the ask CLI, the reproducibility check
 ui/         React dashboard, fed by one scored run
-tests/      380 test functions, 412 cases
+tests/      407 test functions, 441 cases
 ```
 
 Four artifacts leave a run and all four are committed: `EXCEPTIONS.md` (what it could not
@@ -743,12 +743,21 @@ week rather than retroactively.
 
 ### The lifecycle, and why the lag is the point
 
-`proposed` → `shadow` → `active` → `retired`. A rule induced in batch 1 shadows batch 2
-and fires from batch 3 at the earliest. Promotion needs both
-`promotion_min_confirmations` **and** `promotion_min_precision`; volume alone is not
-evidence, and a shadow prediction nobody has ruled on is not a confirmation.
+`proposed` → `shadow` → `active` → `retired`, and nothing enters that ladder on one
+example. An induced rule is laddered into up to three candidates of different reach,
+each one backtested against every exception the operator has already resolved. A
+candidate below `min_support_demonstrations` **distinct demonstrations** is discarded
+before a human ever sees it — 41 of 87 candidates were, across this corpus — and the
+survivors go on a card the operator approves or rejects. Support counts demonstrations,
+not rows: eighty rows cleared by one sentence is one piece of evidence, and counting
+them as eighty is how a rule induced from an anecdote walks in wearing a perfect
+backtest.
 
-Retirement is automatic and it is shown, not hidden. **R-07** was induced in batch 2
+Promotion out of shadow then needs both `promotion_min_confirmations` **and**
+`promotion_min_precision`; volume alone is not evidence, and a shadow prediction nobody
+has ruled on is not a confirmation.
+
+Retirement is automatic and it is shown, not hidden. **R-10** was induced in batch 2
 from a note that generalised across every marketplace, predicted on six late deductions
 in batch 3, was contradicted by the operator's own Amazon resolutions, and retired
 itself at 40.00% precision over five judged observations. The rules page carries it with
@@ -890,7 +899,7 @@ guardrails ran, and the sentence a person typed that the rule came from.
 A rule's **live precision** comes from what the operator's later resolutions said. Its
 **true precision** comes from the answer key, which the pipeline never sees. Both are
 printed, adjacent, because an operator and a rule can be wrong in the same direction:
-R-05 fires on the near-miss rows, the operator confirmed them too, and its live
+R-01 fires on the near-miss rows, the operator confirmed them too, and its live
 precision reads 100.00% against a true precision of 97.44%. That gap is the two planted
 near-misses and it is the entire difference between 98.63% and a suspiciously clean 100%.
 

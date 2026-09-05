@@ -59,17 +59,26 @@ from pipeline.llm.client import LlmClient, client_from
 from pipeline.llm.drafts import narrate
 from pipeline.llm.hypotheses import hypothesise
 from pipeline.llm.induction import induce
-from pipeline.llm.schemas import ClaimNarrative, Hypothesis
+from pipeline.llm.schemas import ClaimNarrative, Hypothesis, InducedRule
 from pipeline.llm.usage import UsageLedger
 from pipeline.loader import BatchTables, load_batch
 from pipeline.matcher import BatchResult, Bucket, MatchConfig, match_config_from
 from pipeline.rules import resolutions as resolution_log
 from pipeline.rules import store as rule_store
 from pipeline.rules.apply import AUTO_RESOLVED, SHADOWED, Decision, decide
+from pipeline.rules.approvals import ApprovalLog
+from pipeline.rules import approvals as approval_log
+from pipeline.rules.backtest import Demonstration, ScoredCandidate, backtest, survivors
+from pipeline.rules.candidates import ladder
 from pipeline.rules.guardrails import GuardrailConfig, guardrail_config_from
 from pipeline.rules.lifecycle import advance, lifecycle_config_from
 from pipeline.rules.models import Rule, RuleState, rule_from
-from pipeline.rules.proposals import Proposal, build as build_proposals
+from pipeline.rules.proposals import (
+    CandidateCard,
+    Proposal,
+    build as build_proposals,
+    candidate_cards,
+)
 from pipeline.rules.resolutions import ACCEPT, DECLINE, OperatorLog, Resolution
 from pipeline.rules.store import RuleStore
 from pipeline.run import OpenBook, run_batch
@@ -125,6 +134,12 @@ class BatchLearning:
     rules_retired: tuple[str, ...]
     resolutions: tuple[Resolution, ...]
     claims: BatchClaims
+    #: Candidates that cleared the support gate and are waiting on a human.
+    candidate_cards: tuple[CandidateCard, ...] = ()
+    #: Candidates the backtest threw away for want of demonstrations. Kept and
+    #: counted: how much of what the model proposes is not worth acting on is a
+    #: result, not an implementation detail.
+    candidates_discarded: tuple[ScoredCandidate, ...] = ()
 
     @property
     def auto_resolved(self) -> tuple[Decision, ...]:
@@ -157,6 +172,10 @@ class BatchLearning:
             "resolutions_captured": len(self.resolutions),
             "claims": self.claims.to_json(),
             "proposals": [proposal.to_json() for proposal in self.proposals],
+            "candidate_cards": [card.to_json() for card in self.candidate_cards],
+            "candidates_discarded": [
+                candidate.to_json() for candidate in self.candidates_discarded
+            ],
             "decisions": [
                 {
                     **decision.provenance.to_json(),
@@ -189,6 +208,8 @@ class LearningRun:
     store: RuleStore = field(default_factory=RuleStore)
     register: ClaimRegister = field(default_factory=lambda: new_register())
     ledger: UsageLedger = field(default_factory=UsageLedger)
+    #: Every resolution the operator wrote, as the evidence candidates are scored on.
+    history: list[Demonstration] = field(default_factory=list)
     #: Whether the token counts behind the cost report were metered by the API or
     #: estimated from a recorded transcript. Carried so the report can label them.
     tokens_estimated: bool = False
@@ -280,43 +301,148 @@ def _apply_card_decisions(store: RuleStore, log: OperatorLog, batch: int) -> Non
                 _judge(store, observation.case_id, correct, "operator_card")
 
 
-def _capture_resolutions(
+@dataclass(frozen=True)
+class Capture:
+    """What this batch's resolutions did to the rule store."""
+
+    learned: tuple[str, ...]
+    cards: tuple[CandidateCard, ...]
+    discarded: tuple[ScoredCandidate, ...]
+
+
+def _demonstrate(
     client: LlmClient,
     store: RuleStore,
     cases_by_id: dict[str, ExceptionCase],
     resolutions: list[Resolution],
-) -> list[str]:
-    """Induce rules from this batch's human resolutions; judge shadow predictions.
+    history: list[Demonstration],
+) -> list[tuple[Resolution, ExceptionCase, InducedRule]]:
+    """Read each resolution into a rule, judge what predicted on it, record the evidence.
 
     Judging happens against the cause the human's own words induced to, never against
     the answer key. That is the product's signal and it is the honest one: the system
     finds out it was wrong the same way a colleague would, by being told.
+
+    Every resolution becomes a :class:`~pipeline.rules.backtest.Demonstration` whether
+    or not a rule ends up standing on it. The history is what candidates are scored
+    against, so it has to be the whole record of what the operator did, not the subset
+    that happened to induce cleanly.
     """
-    learned: list[str] = []
+    read: list[tuple[Resolution, ExceptionCase, InducedRule]] = []
     for resolution in resolutions:
         case = cases_by_id.get(resolution.case_id)
         if case is None:
             continue
         induced = induce(client, resolution.text, case.features, case.batch)
-        candidate = rule_from(
-            induced,
-            rule_id=store.next_id(),
-            batch=case.batch,
-            resolution_id=resolution.resolution_id,
-            operator=resolution.operator,
-        )
-        # Judge before storing: whatever a rule predicted on this case is now checked
-        # against the cause the human's own words imply. Nothing predicted on it means
-        # nothing to judge, and _judge quietly does nothing.
-        was_right = _agrees(store, case.case_id, candidate.cause)
-        _judge(store, case.case_id, was_right, "human_resolution")
 
-        # Six notes about the same stale rate are one rule with six resolutions behind
-        # it, not six rules that each fire on the same rows and each claim the credit.
-        if equivalent(store, candidate) is None:
-            store.add(candidate)
-            learned.append(candidate.rule_id)
-    return learned
+        # Judge before anything is stored: whatever a rule predicted on this case is
+        # now checked against the cause the human's own words imply. Nothing predicted
+        # on it means nothing to judge, and _judge quietly does nothing.
+        _judge(store, case.case_id, _agrees(store, case.case_id, induced.cause.value),
+               "human_resolution")
+
+        history.append(
+            Demonstration(
+                resolution_id=resolution.resolution_id,
+                case_id=case.case_id,
+                batch=case.batch,
+                features=case.features,
+                cause=induced.cause.value,
+            )
+        )
+        read.append((resolution, case, induced))
+    return read
+
+
+def _pending_candidates(
+    store: RuleStore, read: list[tuple[Resolution, ExceptionCase, InducedRule]]
+) -> dict[tuple[Any, ...], tuple[str, Rule]]:
+    """Ladder every reading; fold what already exists back into the rule it repeats.
+
+    Six notes about the same stale rate are one rule with six demonstrations behind
+    it, not six rules that each fire on the same rows and each claim the credit. The
+    fold is also how support accumulates: a rule already in the store gains the new
+    resolution id here, which is what eventually carries it past the support gate.
+    """
+    pending: dict[tuple[Any, ...], tuple[str, Rule]] = {}
+    for resolution, case, induced in read:
+        for rung in ladder(induced):
+            provisional = rule_from(
+                rung.rule,
+                rule_id="",
+                batch=case.batch,
+                resolution_id=resolution.resolution_id,
+                operator=resolution.operator,
+                level=rung.level,
+            )
+            existing = equivalent(store, provisional)
+            if existing is not None:
+                store.replace(existing.demonstrated_by(resolution.resolution_id))
+                continue
+            key = signature(provisional)
+            if key in pending:
+                level, held = pending[key]
+                pending[key] = (level, held.demonstrated_by(resolution.resolution_id))
+                continue
+            pending[key] = (rung.level, provisional)
+    return pending
+
+
+def _capture_resolutions(
+    client: LlmClient,
+    store: RuleStore,
+    cases_by_id: dict[str, ExceptionCase],
+    resolutions: list[Resolution],
+    history: list[Demonstration],
+    approvals: ApprovalLog,
+    min_support: int,
+    batch: int,
+) -> Capture:
+    """Turn this batch's resolutions into evidence, and evidence into candidates.
+
+    The order is the gate:
+
+    1. read every resolution and record the demonstration it constitutes;
+    2. ladder each reading into up to three candidates of different reach;
+    3. fold candidates that repeat a rule already in the store into that rule;
+    4. backtest what is left against the *whole* history, not just this batch;
+    5. discard anything below the support threshold -- and count it;
+    6. admit the survivors as ``proposed``, and put a card in front of a human.
+
+    Nothing here moves a rule into shadow. ``advance`` does that, at the end of the
+    batch, and only for a rule that has both the demonstrations and the approval.
+    """
+    read = _demonstrate(client, store, cases_by_id, resolutions, history)
+    pending = _pending_candidates(store, read)
+
+    scored = [
+        ScoredCandidate(level=level, rule=rule, score=backtest(rule, history, store.firing))
+        for level, rule in pending.values()
+    ]
+    kept, discarded = survivors(scored, min_support)
+
+    learned: list[str] = []
+    admitted: list[ScoredCandidate] = []
+    for candidate in kept:
+        rule = replace(
+            candidate.rule,
+            rule_id=store.next_id(),
+            demonstration_ids=candidate.score.supporting_resolution_ids,
+            backtest_coverage=candidate.score.coverage,
+            backtest_precision=candidate.score.precision,
+        )
+        verdict = approvals.verdict_for(rule)
+        if verdict is not None and verdict.approves:
+            rule = rule.approving(verdict.operator, rule.created_batch, verdict.note)
+        store.add(rule)
+        learned.append(rule.rule_id)
+        admitted.append(replace(candidate, rule=rule))
+
+    return Capture(
+        learned=tuple(learned),
+        cards=tuple(candidate_cards(batch, admitted)),
+        discarded=tuple(discarded),
+    )
 
 
 def _agrees(store: RuleStore, case_id: str, cause: str) -> bool:
@@ -428,11 +554,14 @@ def run_learning_batch(
     register: ClaimRegister,
     narrator: Narrator | None = None,
     guardrails: GuardrailConfig | None = None,
+    history: list[Demonstration] | None = None,
+    approvals: ApprovalLog | None = None,
 ) -> BatchLearning:
     """One batch, all eight steps, in order. See the module docstring for why that order."""
     result = run_batch(tables, book, cfg)
     batch = result.batch
     cases = build_cases(result, finding_log)
+    lifecycle = lifecycle_config_from(thresholds())
 
     hypotheses = _hypothesise_all(client, cases)
     decisions = _decide_all(
@@ -446,8 +575,15 @@ def run_learning_batch(
         register, tables, cases, list(decisions), hypotheses, batch_resolutions,
         narrator or live_narrator(client),
     )
-    learned = _capture_resolutions(
-        client, store, {case.case_id: case for case in cases}, batch_resolutions
+    capture = _capture_resolutions(
+        client,
+        store,
+        {case.case_id: case for case in cases},
+        batch_resolutions,
+        history if history is not None else [],
+        approvals or approval_log.empty(),
+        lifecycle.min_support_demonstrations,
+        batch,
     )
     promoted, retired = _advance_all(store, batch)
 
@@ -459,11 +595,13 @@ def run_learning_batch(
         hypotheses=hypotheses,
         decisions=tuple(decisions),
         proposals=tuple(proposals),
-        rules_learned=tuple(learned),
+        rules_learned=capture.learned,
         rules_promoted=tuple(promoted),
         rules_retired=tuple(retired),
         resolutions=tuple(batch_resolutions),
         claims=claims,
+        candidate_cards=capture.cards,
+        candidates_discarded=capture.discarded,
     )
 
 
@@ -476,6 +614,7 @@ def run(
     narrator: Narrator | None = None,
     allow_network: bool = True,
     guardrails: GuardrailConfig | None = None,
+    approvals: ApprovalLog | None = None,
 ) -> LearningRun:
     """Walk the corpus, learning as it goes.
 
@@ -501,14 +640,21 @@ def run(
     register = new_register()
     run_record = LearningRun(store=store, register=register, ledger=ledger)
 
+    # Carried across batches, like the open book and the finding log: a candidate is
+    # scored against everything the operator has ever resolved, not against the week
+    # it happened to be induced in.
+    history: list[Demonstration] = []
+    decisions_log = approvals if approvals is not None else approval_log.load()
+
     count = last_batch or int(generation()["batch_count"])
     for batch in range(1, count + 1):
         run_record.batches.append(
             run_learning_batch(
                 load_batch(batch, generated_dir), book, cfg, store, client, log,
-                finding_log, register, narrator, policy,
+                finding_log, register, narrator, policy, history, decisions_log,
             )
         )
+    run_record.history = history
     run_record.tokens_estimated = client.tokens_estimated
     return run_record
 
@@ -541,6 +687,8 @@ def summarise(batch: BatchLearning) -> str:
         f"(₹{batch.rupees_auto_resolved:>10})  "
         f"escalated {len(batch.escalated):>3} (₹{batch.rupees_escalated:>10})  "
         f"cards {len(batch.proposals):>2}  "
+        f"candidates {len(batch.candidate_cards):>2}/"
+        f"{len(batch.candidate_cards) + len(batch.candidates_discarded):<2} "
         f"learned {len(batch.rules_learned)} promoted {len(batch.rules_promoted)} "
         f"retired {len(batch.rules_retired)}  "
         f"claims +{len(batch.claims.opened)} "

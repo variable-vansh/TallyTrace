@@ -182,7 +182,9 @@ def test_every_active_rule_spent_time_in_shadow_first(scored) -> None:
     for rule in scored.run.store.rules:
         if rule.state is not RuleState.ACTIVE:
             continue
-        path = [t.to_state for t in rule.transitions]
+        # Approval is recorded as a transition that does not change state, so the
+        # path is filtered to actual moves before it is read.
+        path = [t.to_state for t in rule.transitions if t.to_state != t.from_state]
         assert path[:2] == ["shadow", "active"], (rule.rule_id, path)
         assert path.index("shadow") < path.index("active")
 

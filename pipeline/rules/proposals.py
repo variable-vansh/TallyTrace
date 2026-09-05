@@ -25,9 +25,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, Sequence
 
 from pipeline.rules.apply import AUTO_RESOLVED, HELD, SHADOWED, Decision
+from pipeline.rules.backtest import ScoredCandidate
 from pipeline.rules.models import Rule
 
 ZERO = Decimal("0.00")
@@ -130,3 +131,95 @@ def build(batch: int, decisions: list[Decision], rules: dict[str, Rule]) -> list
             )
         )
     return proposals
+
+
+# --------------------------------------------------------------------------- #
+# The card that comes *before* shadow
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class CandidateCard:
+    """A candidate asking permission to start watching, and the evidence for it.
+
+    The :class:`Proposal` above is the card an operator sees for a rule that is
+    already in the lifecycle -- these rows fired, these rows were held. This one is
+    earlier and asks a different question: *should this rule be allowed to predict at
+    all?* It is the only gate between a sentence somebody typed and an artifact that
+    will one day close rows unattended, so it carries the evidence rather than a
+    summary of it:
+
+    - the rule in the operator's own register, not in schema terms;
+    - how many past cases it fires on, and how often it agreed with the human;
+    - the specific historical records it would have acted on, by id, so the claim can
+      be opened rather than taken;
+    - how many demonstrations stand behind it, and which.
+
+    A card is only built for a candidate that already cleared the support threshold.
+    The ones below it are discarded before this point and counted, because a queue of
+    cards nobody can approve is not a review surface, it is a backlog.
+    """
+
+    batch: int
+    rule_id: str
+    level: str
+    cause: str
+    plain_words: str
+    demonstration_ids: tuple[str, ...]
+    coverage: int
+    precision: Decimal | None
+    conflicts: int
+    would_have_acted_on: tuple[str, ...]
+    learned_from_operator: str
+
+    @property
+    def headline(self) -> str:
+        return self.plain_words
+
+    @property
+    def subhead(self) -> str:
+        """The one line under the rule. Every number in it is from the backtest."""
+        agreement = "no history to judge it on" if self.precision is None else (
+            f"agreed with you on {self.precision:.0%} of them"
+        )
+        return (
+            f"Fires on {self.coverage} case(s) you have already resolved, {agreement}. "
+            f"Learned from {len(self.demonstration_ids)} separate resolution(s)."
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "batch": self.batch,
+            "rule_id": self.rule_id,
+            "level": self.level,
+            "cause": self.cause,
+            "headline": self.headline,
+            "subhead": self.subhead,
+            "demonstration_ids": list(self.demonstration_ids),
+            "demonstrations": len(self.demonstration_ids),
+            "coverage": self.coverage,
+            "precision": None if self.precision is None else str(self.precision),
+            "conflicts": self.conflicts,
+            "would_have_acted_on": list(self.would_have_acted_on),
+            "learned_from_operator": self.learned_from_operator,
+        }
+
+
+def candidate_cards(batch: int, scored: Sequence[ScoredCandidate]) -> list[CandidateCard]:
+    """One card per surviving candidate, in the order :func:`survivors` returned them."""
+    return [
+        CandidateCard(
+            batch=batch,
+            rule_id=candidate.rule.rule_id,
+            level=candidate.level,
+            cause=candidate.rule.cause,
+            plain_words=candidate.rule.plain_words,
+            demonstration_ids=candidate.score.supporting_resolution_ids,
+            coverage=candidate.score.coverage,
+            precision=candidate.score.precision,
+            conflicts=candidate.score.conflicts,
+            would_have_acted_on=candidate.score.fired_on,
+            learned_from_operator=candidate.rule.source_operator,
+        )
+        for candidate in scored
+    ]

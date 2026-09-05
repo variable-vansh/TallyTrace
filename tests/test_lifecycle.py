@@ -25,9 +25,20 @@ CFG = lifecycle_config_from(thresholds())
 
 
 def rule(state: RuleState = RuleState.PROPOSED, **kwargs) -> Rule:
-    defaults = dict(
+    """A rule that has already cleared the evidence gate, unless a test says otherwise.
+
+    Supplying the demonstrations and the approval by default keeps every test below
+    about the transition it is actually testing. The gate itself is tested directly,
+    on rules that deliberately lack one or the other, under "the evidence gate".
+    """
+    defaults: dict = dict(
         rule_id="R-01", cause="commission_rate_stale", resolution_class="internal_fix",
         plain_words="Myntra bills 27.2% against a 25% master rate.", state=state,
+        demonstration_ids=tuple(
+            f"res_{index:04d}" for index in range(CFG.min_support_demonstrations)
+        ),
+        approved=True,
+        approved_by="priya.n@demostore.in",
     )
     return Rule(**{**defaults, **kwargs})
 
@@ -47,16 +58,71 @@ def judged(rule_: Rule, correct: int, wrong: int) -> Rule:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_freshly_induced_rule_goes_to_shadow_and_not_to_active() -> None:
+def test_a_supported_and_approved_rule_goes_to_shadow_and_not_to_active() -> None:
     """No rule automates on the strength of one example."""
     moved = advance(rule(), batch=1, cfg=CFG)
     assert moved.state is RuleState.SHADOW
-    assert moved.transitions[-1].reason.startswith("induced from")
+    assert "operator demonstrations" in moved.transitions[-1].reason
 
 
 def test_a_proposed_rule_cannot_reach_active_in_one_step_however_good_its_record() -> None:
     loaded = judged(rule(), correct=50, wrong=0)
     assert advance(loaded, batch=1, cfg=CFG).state is RuleState.SHADOW
+
+
+# --------------------------------------------------------------------------- #
+# The evidence gate: proposed -> shadow requires demonstrations *and* a human
+# --------------------------------------------------------------------------- #
+
+
+def test_a_rule_with_one_demonstration_can_never_reach_shadow() -> None:
+    """The acceptance check, asserted directly.
+
+    One demonstration is the case the rule was induced from. A rule built on it
+    backtests perfectly on that row by construction, so no backtest number and no
+    amount of approval may buy a way past this.
+    """
+    anecdote = rule(demonstration_ids=("res_0001",), approved=True)
+    assert advance(anecdote, batch=1, cfg=CFG).state is RuleState.PROPOSED
+
+
+def test_no_record_however_good_lifts_a_rule_over_the_support_gate() -> None:
+    """Fifty correct predictions do not substitute for a second human demonstration."""
+    anecdote = judged(rule(demonstration_ids=("res_0001",)), correct=50, wrong=0)
+    assert advance(anecdote, batch=4, cfg=CFG).state is RuleState.PROPOSED
+
+
+def test_support_counts_demonstrations_and_not_rows() -> None:
+    """Eighty rows cleared by one sentence is one piece of evidence, not eighty."""
+    many_rows = judged(rule(demonstration_ids=("res_0001",)), correct=80, wrong=0)
+    assert many_rows.support == 80
+    assert many_rows.demonstration_support == 1
+    assert advance(many_rows, batch=4, cfg=CFG).state is RuleState.PROPOSED
+
+
+def test_the_same_resolution_cannot_be_counted_twice() -> None:
+    """Otherwise one sentence walks a rule through a gate that asks for several."""
+    once = rule(demonstration_ids=()).demonstrated_by("res_0001")
+    assert once.demonstrated_by("res_0001").demonstration_support == 1
+
+
+def test_an_unapproved_rule_waits_however_well_supported_it_is() -> None:
+    """Nobody looked at it, so it does not start watching. Silence is not consent."""
+    unapproved = rule(approved=False)
+    assert unapproved.demonstration_support >= CFG.min_support_demonstrations
+    assert advance(unapproved, batch=2, cfg=CFG).state is RuleState.PROPOSED
+
+
+def test_approval_is_recorded_against_the_rule_and_does_not_move_it() -> None:
+    """Approval says 'worth watching'. The thresholds decide when watching starts."""
+    approved = rule(approved=False).approving("priya.n@demostore.in", batch=2, note="yes")
+    assert approved.approved and approved.approved_by == "priya.n@demostore.in"
+    assert approved.state is RuleState.PROPOSED
+    assert "approved the candidate card" in approved.transitions[-1].reason
+
+
+def test_both_conditions_together_are_what_open_the_gate() -> None:
+    assert advance(rule(), batch=2, cfg=CFG).state is RuleState.SHADOW
 
 
 # --------------------------------------------------------------------------- #
